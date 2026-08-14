@@ -20,6 +20,14 @@ export interface Flag {
    * simply on or off for everyone.
    */
   rolloutPercentage?: number;
+  /**
+   * Optional labels for grouping and filtering, e.g. ["checkout", "beta"].
+   * Each tag is 1-50 characters of lowercase kebab-case; a flag carries at
+   * most 10, with no duplicates. Absent (never an empty array) when the
+   * flag has no tags, mirroring how `rolloutPercentage` is only present
+   * when set.
+   */
+  tags?: string[];
   /** ISO-8601 creation timestamp. */
   createdAt: string;
   /** ISO-8601 timestamp of the last mutation. */
@@ -32,6 +40,7 @@ export interface CreateFlagInput {
   description?: string;
   enabled: boolean;
   rolloutPercentage?: number;
+  tags?: string[];
 }
 
 /** Fields accepted when updating a flag. At least one must be present. */
@@ -39,6 +48,8 @@ export interface UpdateFlagInput {
   description?: string;
   enabled?: boolean;
   rolloutPercentage?: number;
+  /** Replaces the whole tag set; an empty array clears all tags. */
+  tags?: string[];
 }
 
 /** Kind of change a history event records. */
