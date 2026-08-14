@@ -40,6 +40,44 @@ const MAX_HISTORY_LIMIT = 500;
 const isValidRolloutPercentage = (value: unknown): value is number =>
   typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 100;
 
+/** A flag carries at most this many tags. */
+const MAX_TAGS_PER_FLAG = 10;
+
+/** Individual tags: 1-50 chars of lowercase kebab-case. */
+const MAX_TAG_LENGTH = 50;
+const TAG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+/**
+ * Validate a `tags` value from a request body. Returns a human-readable
+ * problem description, or `undefined` when the value is acceptable. All
+ * failures map to the single `invalid_tags` error code; the message is
+ * what tells the caller which rule they broke.
+ */
+const findTagsProblem = (value: unknown): string | undefined => {
+  if (!Array.isArray(value)) {
+    return "`tags` must be an array of strings.";
+  }
+  if (value.length > MAX_TAGS_PER_FLAG) {
+    return `A flag may have at most ${MAX_TAGS_PER_FLAG} tags.`;
+  }
+  const seen = new Set<string>();
+  for (const tag of value) {
+    if (
+      typeof tag !== "string" ||
+      tag.length < 1 ||
+      tag.length > MAX_TAG_LENGTH ||
+      !TAG_PATTERN.test(tag)
+    ) {
+      return `Each tag must be 1-${MAX_TAG_LENGTH} characters of lowercase kebab-case (letters, digits, single dashes).`;
+    }
+    if (seen.has(tag)) {
+      return `Duplicate tag "${tag}".`;
+    }
+    seen.add(tag);
+  }
+  return undefined;
+};
+
 export function createApp({ store, apiToken }: AppOptions): Hono {
   const app = new Hono();
 
@@ -66,7 +104,32 @@ export function createApp({ store, apiToken }: AppOptions): Hono {
   });
 
   v1.get("/flags", (c) => {
-    return c.json({ flags: store.list() });
+    // An empty `?tag=` is treated as absent, matching how `/evaluate`
+    // handles an empty `unit`: clients that always append the param get
+    // the unfiltered list. Filtering is an exact match, so a value that
+    // could never be a valid tag simply yields an empty list rather than
+    // an error.
+    const tagParam = c.req.query("tag");
+    const flags = tagParam
+      ? store.list().filter((flag) => flag.tags?.includes(tagParam))
+      : store.list();
+    return c.json({ flags });
+  });
+
+  // Distinct tags across all flags with usage counts, sorted by tag name so
+  // the response is stable regardless of flag creation order. Deleted flags
+  // no longer contribute — this reflects the live flag set only.
+  v1.get("/tags", (c) => {
+    const counts = new Map<string, number>();
+    for (const flag of store.list()) {
+      for (const tag of flag.tags ?? []) {
+        counts.set(tag, (counts.get(tag) ?? 0) + 1);
+      }
+    }
+    const tags = [...counts.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([tag, count]) => ({ tag, count }));
+    return c.json({ tags });
   });
 
   v1.post("/flags", async (c) => {
@@ -77,7 +140,7 @@ export function createApp({ store, apiToken }: AppOptions): Hono {
       return c.json(errorBody("invalid_json", "Request body must be valid JSON."), 400);
     }
 
-    const { key, description, enabled, rolloutPercentage } = (body ?? {}) as Record<string, unknown>;
+    const { key, description, enabled, rolloutPercentage, tags } = (body ?? {}) as Record<string, unknown>;
 
     if (typeof key !== "string" || !FLAG_KEY_PATTERN.test(key)) {
       return c.json(
@@ -100,11 +163,23 @@ export function createApp({ store, apiToken }: AppOptions): Hono {
         400,
       );
     }
+    if (tags !== undefined) {
+      const problem = findTagsProblem(tags);
+      if (problem) {
+        return c.json(errorBody("invalid_tags", problem), 400);
+      }
+    }
     if (store.has(key)) {
       return c.json(errorBody("flag_exists", `A flag with key "${key}" already exists.`), 409);
     }
 
-    const flag = store.create({ key, description, enabled, rolloutPercentage });
+    const flag = store.create({
+      key,
+      description,
+      enabled,
+      rolloutPercentage,
+      tags: tags as string[] | undefined,
+    });
     return c.json(flag, 201);
   });
 
@@ -124,7 +199,7 @@ export function createApp({ store, apiToken }: AppOptions): Hono {
       return c.json(errorBody("invalid_json", "Request body must be valid JSON."), 400);
     }
 
-    const { description, enabled, rolloutPercentage } = (body ?? {}) as Record<string, unknown>;
+    const { description, enabled, rolloutPercentage, tags } = (body ?? {}) as Record<string, unknown>;
 
     if (enabled !== undefined && typeof enabled !== "boolean") {
       return c.json(errorBody("invalid_enabled", "`enabled` must be a boolean."), 400);
@@ -138,9 +213,23 @@ export function createApp({ store, apiToken }: AppOptions): Hono {
         400,
       );
     }
-    if (enabled === undefined && description === undefined && rolloutPercentage === undefined) {
+    if (tags !== undefined) {
+      const problem = findTagsProblem(tags);
+      if (problem) {
+        return c.json(errorBody("invalid_tags", problem), 400);
+      }
+    }
+    if (
+      enabled === undefined &&
+      description === undefined &&
+      rolloutPercentage === undefined &&
+      tags === undefined
+    ) {
       return c.json(
-        errorBody("empty_update", "Provide at least one of `enabled`, `description`, or `rolloutPercentage`."),
+        errorBody(
+          "empty_update",
+          "Provide at least one of `enabled`, `description`, `rolloutPercentage`, or `tags`.",
+        ),
         400,
       );
     }
@@ -149,6 +238,7 @@ export function createApp({ store, apiToken }: AppOptions): Hono {
     if (enabled !== undefined) patch.enabled = enabled;
     if (description !== undefined) patch.description = description;
     if (rolloutPercentage !== undefined) patch.rolloutPercentage = rolloutPercentage;
+    if (tags !== undefined) patch.tags = tags as string[];
 
     const updated = store.update(c.req.param("key"), patch);
     if (!updated) {

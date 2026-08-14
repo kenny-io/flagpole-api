@@ -374,6 +374,199 @@ describe("GET /v1/flags/:key/history", () => {
   });
 });
 
+describe("flag tags", () => {
+  it("creates a flag with tags and returns them", async () => {
+    const app = makeApp();
+    const res = await app.request(
+      "/v1/flags",
+      json({ key: "a", enabled: true, tags: ["checkout", "beta"] }),
+    );
+    expect(res.status).toBe(201);
+    expect((await res.json()).tags).toEqual(["checkout", "beta"]);
+  });
+
+  it("omits tags from the flag when not provided", async () => {
+    const app = makeApp();
+    const res = await app.request("/v1/flags", json({ key: "a", enabled: true }));
+    expect(await res.json()).not.toHaveProperty("tags");
+  });
+
+  it("treats an empty tags array on create as no tags", async () => {
+    const app = makeApp();
+    const res = await app.request("/v1/flags", json({ key: "a", enabled: true, tags: [] }));
+    expect(res.status).toBe(201);
+    expect(await res.json()).not.toHaveProperty("tags");
+  });
+
+  it("accepts up to 10 tags and single-character or 50-character tags", async () => {
+    const app = makeApp();
+    const tags = [...Array.from({ length: 8 }, (_, i) => `tag-${i}`), "x", "a".repeat(50)];
+    expect(tags).toHaveLength(10);
+    const res = await app.request("/v1/flags", json({ key: "a", enabled: true, tags }));
+    expect(res.status).toBe(201);
+    expect((await res.json()).tags).toEqual(tags);
+  });
+
+  it("rejects more than 10 tags with 400 invalid_tags", async () => {
+    const app = makeApp();
+    const tags = Array.from({ length: 11 }, (_, i) => `tag-${i}`);
+    const res = await app.request("/v1/flags", json({ key: "a", enabled: true, tags }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe("invalid_tags");
+  });
+
+  it("rejects malformed tags with 400 invalid_tags", async () => {
+    const app = makeApp();
+    const badTagSets = [
+      "not-an-array",
+      ["Checkout"],
+      ["has space"],
+      ["-leading"],
+      ["trailing-"],
+      ["double--dash"],
+      [""],
+      ["a".repeat(51)],
+      [42],
+      [null],
+      ["under_score"],
+    ];
+    for (const tags of badTagSets) {
+      const res = await app.request("/v1/flags", json({ key: "a", enabled: true, tags }));
+      expect(res.status).toBe(400);
+      expect((await res.json()).error.code).toBe("invalid_tags");
+    }
+  });
+
+  it("rejects duplicate tags with 400 invalid_tags", async () => {
+    const app = makeApp();
+    const res = await app.request(
+      "/v1/flags",
+      json({ key: "a", enabled: true, tags: ["beta", "beta"] }),
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe("invalid_tags");
+  });
+
+  it("replaces the whole tag set on PATCH", async () => {
+    const app = makeApp();
+    await app.request("/v1/flags", json({ key: "a", enabled: true, tags: ["old", "stale"] }));
+    const res = await app.request("/v1/flags/a", { ...json({ tags: ["fresh"] }), method: "PATCH" });
+    expect(res.status).toBe(200);
+    expect((await res.json()).tags).toEqual(["fresh"]);
+  });
+
+  it("clears all tags when PATCHed with an empty array", async () => {
+    const app = makeApp();
+    await app.request("/v1/flags", json({ key: "a", enabled: true, tags: ["beta"] }));
+    const res = await app.request("/v1/flags/a", { ...json({ tags: [] }), method: "PATCH" });
+    expect(res.status).toBe(200);
+    expect(await res.json()).not.toHaveProperty("tags");
+  });
+
+  it("accepts a PATCH containing only tags", async () => {
+    const app = makeApp();
+    await app.request("/v1/flags", json({ key: "a", enabled: true }));
+    const res = await app.request("/v1/flags/a", { ...json({ tags: ["solo"] }), method: "PATCH" });
+    expect(res.status).toBe(200);
+    const updated = await res.json();
+    expect(updated.tags).toEqual(["solo"]);
+    expect(updated.enabled).toBe(true);
+  });
+
+  it("rejects invalid tags on PATCH with 400 invalid_tags", async () => {
+    const app = makeApp();
+    await app.request("/v1/flags", json({ key: "a", enabled: true }));
+    const res = await app.request("/v1/flags/a", { ...json({ tags: ["BAD"] }), method: "PATCH" });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe("invalid_tags");
+  });
+
+  it("records tags in history on create, update, and clear", async () => {
+    const app = makeApp();
+    await app.request("/v1/flags", json({ key: "a", enabled: true, tags: ["beta"] }));
+    await app.request("/v1/flags/a", { ...json({ tags: ["ga"] }), method: "PATCH" });
+    await app.request("/v1/flags/a", { ...json({ tags: [] }), method: "PATCH" });
+    const { events } = await (await app.request("/v1/flags/a/history")).json();
+    expect(events[0].changes.tags).toEqual(["beta"]);
+    expect(events[1].changes).toEqual({ tags: ["ga"] });
+    expect(events[2].changes).toEqual({ tags: [] });
+  });
+});
+
+describe("GET /v1/flags?tag=", () => {
+  it("filters the list to flags carrying the tag", async () => {
+    const app = makeApp();
+    await app.request("/v1/flags", json({ key: "a", enabled: true, tags: ["checkout", "beta"] }));
+    await app.request("/v1/flags", json({ key: "b", enabled: false, tags: ["search"] }));
+    await app.request("/v1/flags", json({ key: "c", enabled: true }));
+    const res = await app.request("/v1/flags?tag=checkout");
+    expect(res.status).toBe(200);
+    const { flags } = await res.json();
+    expect(flags.map((f: { key: string }) => f.key)).toEqual(["a"]);
+  });
+
+  it("returns an empty list for a tag no flag carries", async () => {
+    const app = makeApp();
+    await app.request("/v1/flags", json({ key: "a", enabled: true, tags: ["beta"] }));
+    const res = await app.request("/v1/flags?tag=ghost");
+    expect(res.status).toBe(200);
+    expect((await res.json()).flags).toEqual([]);
+  });
+
+  it("treats an empty ?tag= as absent and lists everything", async () => {
+    const app = makeApp();
+    await app.request("/v1/flags", json({ key: "a", enabled: true, tags: ["beta"] }));
+    await app.request("/v1/flags", json({ key: "b", enabled: true }));
+    const res = await app.request("/v1/flags?tag=");
+    expect(res.status).toBe(200);
+    expect((await res.json()).flags).toHaveLength(2);
+  });
+});
+
+describe("GET /v1/tags", () => {
+  it("lists distinct tags with counts, sorted by tag name", async () => {
+    const app = makeApp();
+    await app.request("/v1/flags", json({ key: "a", enabled: true, tags: ["checkout", "beta"] }));
+    await app.request("/v1/flags", json({ key: "b", enabled: false, tags: ["beta"] }));
+    await app.request("/v1/flags", json({ key: "c", enabled: true, tags: ["search"] }));
+    const res = await app.request("/v1/tags");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      tags: [
+        { tag: "beta", count: 2 },
+        { tag: "checkout", count: 1 },
+        { tag: "search", count: 1 },
+      ],
+    });
+  });
+
+  it("returns an empty list when no flag has tags", async () => {
+    const app = makeApp();
+    await app.request("/v1/flags", json({ key: "a", enabled: true }));
+    const res = await app.request("/v1/tags");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ tags: [] });
+  });
+
+  it("drops a deleted flag's tags from the counts", async () => {
+    const app = makeApp();
+    await app.request("/v1/flags", json({ key: "a", enabled: true, tags: ["beta"] }));
+    await app.request("/v1/flags", json({ key: "b", enabled: true, tags: ["beta"] }));
+    await app.request("/v1/flags/a", { method: "DELETE" });
+    const { tags } = await (await app.request("/v1/tags")).json();
+    expect(tags).toEqual([{ tag: "beta", count: 1 }]);
+  });
+
+  it("requires the bearer token like every other /v1 route", async () => {
+    const app = makeApp("s3cret");
+    expect((await app.request("/v1/tags")).status).toBe(401);
+    const res = await app.request("/v1/tags", {
+      headers: { authorization: "Bearer s3cret" },
+    });
+    expect(res.status).toBe(200);
+  });
+});
+
 describe("bearer-token auth", () => {
   it("rejects /v1 requests without a token when one is configured", async () => {
     const app = makeApp("s3cret");
@@ -465,6 +658,25 @@ describe("file persistence", () => {
     expect(res.status).toBe(200);
     const { events } = await res.json();
     expect(events.map((e: { type: string }) => e.type)).toEqual(["created", "updated", "deleted"]);
+  });
+
+  it("persists tags to disk and reloads them in a new store", async () => {
+    dir = mkdtempSync(join(tmpdir(), "flagpole-test-"));
+    const dataFile = join(dir, "flags.json");
+
+    const first = createApp({ store: createStore(dataFile) });
+    await first.request("/v1/flags", json({ key: "tagged", enabled: true, tags: ["beta", "checkout"] }));
+
+    const second = createApp({ store: createStore(dataFile) });
+    const res = await second.request("/v1/flags/tagged");
+    expect(res.status).toBe(200);
+    expect((await res.json()).tags).toEqual(["beta", "checkout"]);
+
+    const listed = await (await second.request("/v1/tags")).json();
+    expect(listed.tags).toEqual([
+      { tag: "beta", count: 1 },
+      { tag: "checkout", count: 1 },
+    ]);
   });
 
   it("loads a legacy bare-array data file and serves an empty history", async () => {

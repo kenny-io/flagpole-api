@@ -9,7 +9,7 @@ at a JSON file for durable, human-inspectable storage.
 
 ## Why Flagpole
 
-- **Tiny surface area.** Eight endpoints. You can read the whole API reference below in a minute.
+- **Tiny surface area.** Nine endpoints. You can read the whole API reference below in a minute.
 - **Zero infrastructure.** In-memory by default; optional single-file JSON persistence. No Postgres, no Redis.
 - **Boring auth.** One static bearer token via an environment variable. Leave it unset for local development.
 - **Honest errors.** Every non-2xx response is the same JSON envelope: `{ "error": { "code", "message" } }`.
@@ -60,13 +60,14 @@ every `/v1` route requires `Authorization: Bearer <token>` when
 | Method | Path | Description | Body / params | Success |
 | ------ | ---- | ----------- | ------------- | ------- |
 | `GET` | `/health` | Liveness check. | — | `200` `{ "status": "ok" }` |
-| `GET` | `/v1/flags` | List all flags. | — | `200` `{ "flags": [Flag] }` |
-| `POST` | `/v1/flags` | Create a flag. | `key` (string, required), `enabled` (boolean, required), `description` (string, optional), `rolloutPercentage` (integer 0–100, optional) | `201` `Flag` |
+| `GET` | `/v1/flags` | List all flags. | `?tag=<t>` (optional) returns only flags carrying that tag | `200` `{ "flags": [Flag] }` |
+| `POST` | `/v1/flags` | Create a flag. | `key` (string, required), `enabled` (boolean, required), `description` (string, optional), `rolloutPercentage` (integer 0–100, optional), `tags` (array of strings, optional) | `201` `Flag` |
 | `GET` | `/v1/flags/:key` | Fetch one flag. | `:key` path param | `200` `Flag` |
-| `PATCH` | `/v1/flags/:key` | Update a flag. | `enabled` (boolean), `description` (string), and/or `rolloutPercentage` (integer 0–100) — at least one | `200` `Flag` |
+| `PATCH` | `/v1/flags/:key` | Update a flag. | `enabled` (boolean), `description` (string), `rolloutPercentage` (integer 0–100), and/or `tags` (array of strings) — at least one | `200` `Flag` |
 | `DELETE` | `/v1/flags/:key` | Delete a flag. | `:key` path param | `204` (no body) |
 | `GET` | `/v1/flags/:key/evaluate` | Evaluate a flag (hot path for pollers). | `:key` path param; `?unit=<string>` (optional) buckets the unit for percentage rollouts | `200` `{ "key", "enabled", "rolloutPercentage"? }` |
 | `GET` | `/v1/flags/:key/history` | Change history for a flag. | `:key` path param; `?limit=<n>` (optional) returns only the most recent `n` events (integer 1–500) | `200` `{ "key", "events": [FlagEvent] }` |
+| `GET` | `/v1/tags` | List distinct tags across all flags with usage counts. | — | `200` `{ "tags": [{ "tag", "count" }] }` |
 
 ### The Flag object
 
@@ -76,6 +77,7 @@ every `/v1` route requires `Authorization: Bearer <token>` when
   "description": "New checkout flow",
   "enabled": true,
   "rolloutPercentage": 25,
+  "tags": ["checkout", "beta"],
   "createdAt": "2026-08-13T12:00:00.000Z",
   "updatedAt": "2026-08-13T12:00:00.000Z"
 }
@@ -83,7 +85,8 @@ every `/v1` route requires `Authorization: Bearer <token>` when
 
 Keys are 1–64 characters of letters, digits, dots, dashes, or underscores,
 and are immutable after creation. `rolloutPercentage` is only present when
-the flag uses a percentage rollout.
+the flag uses a percentage rollout, and `tags` only when the flag has at
+least one tag.
 
 ### Percentage rollouts
 
@@ -103,6 +106,46 @@ and raising the percentage only ever adds units to the enabled cohort.
 `enabled` remains the master switch: a disabled flag is off for everyone,
 and evaluating without a `unit` (or a flag without a `rolloutPercentage`)
 returns the plain boolean.
+
+### Tags
+
+Tags group related flags — by team, surface, launch, or anything else —
+so you can slice a growing flag list without a naming convention. Attach
+them on create or replace them later with a PATCH:
+
+```bash
+curl -s -X POST http://localhost:3333/v1/flags \
+  -H 'content-type: application/json' \
+  -d '{"key": "new-checkout", "enabled": true, "tags": ["checkout", "beta"]}'
+
+curl -s -X PATCH http://localhost:3333/v1/flags/new-checkout \
+  -H 'content-type: application/json' \
+  -d '{"tags": ["checkout"]}'
+```
+
+A flag carries at most 10 tags. Each tag is 1–50 characters of lowercase
+kebab-case — letters, digits, and single dashes, e.g. `checkout` or
+`q3-launch` — with no duplicates within a flag. Anything else returns
+`400` `invalid_tags`. A PATCH replaces the whole tag set (there is no
+merge); pass an empty array to remove every tag, after which the `tags`
+field disappears from the flag entirely.
+
+Filter the flag list by tag, or ask for the full tag inventory:
+
+```bash
+curl -s 'http://localhost:3333/v1/flags?tag=checkout'
+# {"flags":[ ...only flags tagged "checkout"... ]}
+
+curl -s http://localhost:3333/v1/tags
+# {"tags":[{"tag":"beta","count":1},{"tag":"checkout","count":2}]}
+```
+
+`GET /v1/tags` returns every distinct tag on a live flag with the number
+of flags carrying it, sorted by tag name. Deleted flags do not contribute.
+Filtering by a tag no flag carries returns an empty list, not an error,
+and an empty `?tag=` is treated as absent. Tags are persisted with the
+flag when `FLAGPOLE_DATA_FILE` is set, and tag changes appear in the
+flag's history like any other field.
 
 ### Change history
 
@@ -155,7 +198,8 @@ Every error uses the same envelope:
 | `400` | `invalid_enabled` | `enabled` is not a boolean. |
 | `400` | `invalid_description` | `description` is not a string. |
 | `400` | `invalid_rollout_percentage` | `rolloutPercentage` is not an integer between 0 and 100. |
-| `400` | `empty_update` | PATCH body has none of `enabled`, `description`, or `rolloutPercentage`. |
+| `400` | `invalid_tags` | `tags` is not an array of up to 10 unique lowercase kebab-case strings (1–50 chars each). |
+| `400` | `empty_update` | PATCH body has none of `enabled`, `description`, `rolloutPercentage`, or `tags`. |
 | `400` | `invalid_limit` | History `limit` is not an integer between 1 and 500. |
 | `401` | `unauthorized` | Missing or wrong bearer token. |
 | `404` | `flag_not_found` | No flag with that key. |

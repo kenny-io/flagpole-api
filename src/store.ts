@@ -121,6 +121,11 @@ export function createStore(dataFile?: string): FlagStore {
       if (input.rolloutPercentage !== undefined) {
         flag.rolloutPercentage = input.rolloutPercentage;
       }
+      // Tags are copied defensively and an empty set is stored as "absent",
+      // so serialized flags never carry a meaningless `"tags": []`.
+      if (input.tags !== undefined && input.tags.length > 0) {
+        flag.tags = [...input.tags];
+      }
       flags.set(flag.key, flag);
       // The "created" event snapshots the initial user-settable values so
       // history alone can reconstruct the flag's starting state.
@@ -129,6 +134,7 @@ export function createStore(dataFile?: string): FlagStore {
         enabled: flag.enabled,
       };
       if (flag.rolloutPercentage !== undefined) changes.rolloutPercentage = flag.rolloutPercentage;
+      if (flag.tags !== undefined) changes.tags = [...flag.tags];
       recordEvent(flag.key, "created", now, changes);
       persist();
       return flag;
@@ -147,6 +153,15 @@ export function createStore(dataFile?: string): FlagStore {
       if (input.rolloutPercentage !== undefined) {
         updated.rolloutPercentage = input.rolloutPercentage;
       }
+      // Tags replace wholesale rather than merging: an empty array clears
+      // the field entirely so the flag returns to the "no tags" shape.
+      if (input.tags !== undefined) {
+        if (input.tags.length > 0) {
+          updated.tags = [...input.tags];
+        } else {
+          delete updated.tags;
+        }
+      }
       flags.set(key, updated);
       // Record only the fields the caller actually patched, so history
       // reads as a diff stream rather than repeated full snapshots.
@@ -154,6 +169,7 @@ export function createStore(dataFile?: string): FlagStore {
       if (input.description !== undefined) changes.description = input.description;
       if (input.enabled !== undefined) changes.enabled = input.enabled;
       if (input.rolloutPercentage !== undefined) changes.rolloutPercentage = input.rolloutPercentage;
+      if (input.tags !== undefined) changes.tags = [...input.tags];
       recordEvent(key, "updated", now, changes);
       persist();
       return updated;
