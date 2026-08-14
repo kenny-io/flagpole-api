@@ -13,6 +13,13 @@ export interface Flag {
   description: string;
   /** Whether the flag is currently on. */
   enabled: boolean;
+  /**
+   * Optional percentage rollout, an integer 0-100. When set, evaluation
+   * with a `unit` hashes the unit into a bucket and only enables the flag
+   * for units below this threshold. Absent means "no rollout": the flag is
+   * simply on or off for everyone.
+   */
+  rolloutPercentage?: number;
   /** ISO-8601 creation timestamp. */
   createdAt: string;
   /** ISO-8601 timestamp of the last mutation. */
@@ -24,12 +31,29 @@ export interface CreateFlagInput {
   key: string;
   description?: string;
   enabled: boolean;
+  rolloutPercentage?: number;
 }
 
 /** Fields accepted when updating a flag. At least one must be present. */
 export interface UpdateFlagInput {
   description?: string;
   enabled?: boolean;
+  rolloutPercentage?: number;
+}
+
+/** Kind of change a history event records. */
+export type FlagEventType = "created" | "updated" | "deleted";
+
+/**
+ * One entry in a flag's change history. `changes` carries the field values
+ * that the event applied: the full initial values for `created`, only the
+ * patched fields for `updated`, and an empty object for `deleted`.
+ */
+export interface FlagEvent {
+  type: FlagEventType;
+  /** ISO-8601 timestamp of the change. */
+  at: string;
+  changes: Record<string, unknown>;
 }
 
 /**

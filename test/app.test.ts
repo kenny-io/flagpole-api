@@ -5,7 +5,7 @@
  * each test builds a fresh app + store for isolation.
  */
 
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -81,6 +81,28 @@ describe("POST /v1/flags", () => {
     expect((await res.json()).error.code).toBe("invalid_json");
   });
 
+  it("accepts a valid rolloutPercentage", async () => {
+    const app = makeApp();
+    const res = await app.request("/v1/flags", json({ key: "gradual", enabled: true, rolloutPercentage: 25 }));
+    expect(res.status).toBe(201);
+    expect((await res.json()).rolloutPercentage).toBe(25);
+  });
+
+  it("rejects an invalid rolloutPercentage with 400", async () => {
+    const app = makeApp();
+    for (const rolloutPercentage of [-1, 101, 12.5, "50", null, true]) {
+      const res = await app.request("/v1/flags", json({ key: "bad", enabled: true, rolloutPercentage }));
+      expect(res.status).toBe(400);
+      expect((await res.json()).error.code).toBe("invalid_rollout_percentage");
+    }
+  });
+
+  it("omits rolloutPercentage from the flag when not provided", async () => {
+    const app = makeApp();
+    const res = await app.request("/v1/flags", json({ key: "plain", enabled: true }));
+    expect(await res.json()).not.toHaveProperty("rolloutPercentage");
+  });
+
   it("rejects a duplicate key with 409", async () => {
     const app = makeApp();
     await app.request("/v1/flags", json({ key: "dupe", enabled: true }));
@@ -147,6 +169,24 @@ describe("PATCH /v1/flags/:key", () => {
     expect((await res.json()).error.code).toBe("empty_update");
   });
 
+  it("updates rolloutPercentage on its own", async () => {
+    const app = makeApp();
+    await app.request("/v1/flags", json({ key: "a", enabled: true }));
+    const res = await app.request("/v1/flags/a", { ...json({ rolloutPercentage: 40 }), method: "PATCH" });
+    expect(res.status).toBe(200);
+    const updated = await res.json();
+    expect(updated.rolloutPercentage).toBe(40);
+    expect(updated.enabled).toBe(true);
+  });
+
+  it("rejects an invalid rolloutPercentage with 400", async () => {
+    const app = makeApp();
+    await app.request("/v1/flags", json({ key: "a", enabled: true }));
+    const res = await app.request("/v1/flags/a", { ...json({ rolloutPercentage: 200 }), method: "PATCH" });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe("invalid_rollout_percentage");
+  });
+
   it("404s on an unknown key", async () => {
     const app = makeApp();
     const res = await app.request("/v1/flags/ghost", { ...json({ enabled: true }), method: "PATCH" });
@@ -183,6 +223,106 @@ describe("GET /v1/flags/:key/evaluate", () => {
     const app = makeApp();
     const res = await app.request("/v1/flags/ghost/evaluate");
     expect(res.status).toBe(404);
+  });
+
+  it("includes rolloutPercentage when the flag has one", async () => {
+    const app = makeApp();
+    await app.request("/v1/flags", json({ key: "a", enabled: true, rolloutPercentage: 50 }));
+    const res = await app.request("/v1/flags/a/evaluate");
+    expect(await res.json()).toEqual({ key: "a", enabled: true, rolloutPercentage: 50 });
+  });
+
+  it("is deterministic for the same unit", async () => {
+    const app = makeApp();
+    await app.request("/v1/flags", json({ key: "a", enabled: true, rolloutPercentage: 50 }));
+    const first = await (await app.request("/v1/flags/a/evaluate?unit=user-42")).json();
+    for (let i = 0; i < 5; i++) {
+      const again = await (await app.request("/v1/flags/a/evaluate?unit=user-42")).json();
+      expect(again.enabled).toBe(first.enabled);
+    }
+  });
+
+  it("enables every unit at 100 and none at 0", async () => {
+    const app = makeApp();
+    await app.request("/v1/flags", json({ key: "all", enabled: true, rolloutPercentage: 100 }));
+    await app.request("/v1/flags", json({ key: "none", enabled: true, rolloutPercentage: 0 }));
+    for (const unit of ["u1", "u2", "u3"]) {
+      expect((await (await app.request(`/v1/flags/all/evaluate?unit=${unit}`)).json()).enabled).toBe(true);
+      expect((await (await app.request(`/v1/flags/none/evaluate?unit=${unit}`)).json()).enabled).toBe(false);
+    }
+  });
+
+  it("splits units at a partial percentage", async () => {
+    const app = makeApp();
+    await app.request("/v1/flags", json({ key: "half", enabled: true, rolloutPercentage: 50 }));
+    const results = new Set<boolean>();
+    for (let i = 0; i < 50; i++) {
+      const { enabled } = await (await app.request(`/v1/flags/half/evaluate?unit=user-${i}`)).json();
+      results.add(enabled);
+    }
+    // With 50 distinct units at 50%, both outcomes must occur.
+    expect(results).toEqual(new Set([true, false]));
+  });
+
+  it("keeps a disabled flag off for every unit regardless of percentage", async () => {
+    const app = makeApp();
+    await app.request("/v1/flags", json({ key: "a", enabled: false, rolloutPercentage: 100 }));
+    const res = await app.request("/v1/flags/a/evaluate?unit=user-1");
+    expect((await res.json()).enabled).toBe(false);
+  });
+
+  it("falls back to the plain boolean when no unit is given", async () => {
+    const app = makeApp();
+    await app.request("/v1/flags", json({ key: "a", enabled: true, rolloutPercentage: 0 }));
+    const res = await app.request("/v1/flags/a/evaluate");
+    expect((await res.json()).enabled).toBe(true);
+  });
+
+  it("ignores a unit on a flag without a rolloutPercentage", async () => {
+    const app = makeApp();
+    await app.request("/v1/flags", json({ key: "a", enabled: true }));
+    const res = await app.request("/v1/flags/a/evaluate?unit=user-1");
+    expect(await res.json()).toEqual({ key: "a", enabled: true });
+  });
+});
+
+describe("GET /v1/flags/:key/history", () => {
+  it("records created, updated, and deleted events in order", async () => {
+    const app = makeApp();
+    await app.request("/v1/flags", json({ key: "a", description: "d", enabled: false }));
+    await app.request("/v1/flags/a", { ...json({ enabled: true, rolloutPercentage: 10 }), method: "PATCH" });
+    await app.request("/v1/flags/a", { method: "DELETE" });
+
+    const res = await app.request("/v1/flags/a/history");
+    expect(res.status).toBe(200);
+    const { key, events } = await res.json();
+    expect(key).toBe("a");
+    expect(events).toHaveLength(3);
+    expect(events[0]).toMatchObject({
+      type: "created",
+      changes: { description: "d", enabled: false },
+    });
+    expect(events[1]).toMatchObject({
+      type: "updated",
+      changes: { enabled: true, rolloutPercentage: 10 },
+    });
+    expect(events[2]).toMatchObject({ type: "deleted", changes: {} });
+    for (const event of events) expect(Date.parse(event.at)).not.toBeNaN();
+  });
+
+  it("records only the patched fields on update", async () => {
+    const app = makeApp();
+    await app.request("/v1/flags", json({ key: "a", enabled: true }));
+    await app.request("/v1/flags/a", { ...json({ description: "note" }), method: "PATCH" });
+    const { events } = await (await app.request("/v1/flags/a/history")).json();
+    expect(events[1].changes).toEqual({ description: "note" });
+  });
+
+  it("404s on a key that never existed", async () => {
+    const app = makeApp();
+    const res = await app.request("/v1/flags/ghost/history");
+    expect(res.status).toBe(404);
+    expect((await res.json()).error.code).toBe("flag_not_found");
   });
 });
 
@@ -242,8 +382,8 @@ describe("file persistence", () => {
 
     // File contents are readable, pretty-printed JSON.
     const onDisk = JSON.parse(readFileSync(dataFile, "utf8"));
-    expect(onDisk).toHaveLength(1);
-    expect(onDisk[0].key).toBe("persisted");
+    expect(onDisk.flags).toHaveLength(1);
+    expect(onDisk.flags[0].key).toBe("persisted");
 
     // A brand-new store (fresh process, conceptually) sees the same flag.
     const second = createApp({ store: createStore(dataFile) });
@@ -260,6 +400,41 @@ describe("file persistence", () => {
     await app.request("/v1/flags", json({ key: "gone", enabled: true }));
     await app.request("/v1/flags/gone", { method: "DELETE" });
 
-    expect(JSON.parse(readFileSync(dataFile, "utf8"))).toEqual([]);
+    expect(JSON.parse(readFileSync(dataFile, "utf8")).flags).toEqual([]);
+  });
+
+  it("persists history across store reloads, including for deleted flags", async () => {
+    dir = mkdtempSync(join(tmpdir(), "flagpole-test-"));
+    const dataFile = join(dir, "flags.json");
+
+    const first = createApp({ store: createStore(dataFile) });
+    await first.request("/v1/flags", json({ key: "audited", enabled: true }));
+    await first.request("/v1/flags/audited", { ...json({ enabled: false }), method: "PATCH" });
+    await first.request("/v1/flags/audited", { method: "DELETE" });
+
+    const second = createApp({ store: createStore(dataFile) });
+    const res = await second.request("/v1/flags/audited/history");
+    expect(res.status).toBe(200);
+    const { events } = await res.json();
+    expect(events.map((e: { type: string }) => e.type)).toEqual(["created", "updated", "deleted"]);
+  });
+
+  it("loads a legacy bare-array data file and serves an empty history", async () => {
+    dir = mkdtempSync(join(tmpdir(), "flagpole-test-"));
+    const dataFile = join(dir, "flags.json");
+    const legacyFlag = {
+      key: "old",
+      description: "",
+      enabled: true,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+    writeFileSync(dataFile, JSON.stringify([legacyFlag]));
+
+    const app = createApp({ store: createStore(dataFile) });
+    expect((await app.request("/v1/flags/old")).status).toBe(200);
+    const res = await app.request("/v1/flags/old/history");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ key: "old", events: [] });
   });
 });
