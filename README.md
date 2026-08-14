@@ -66,7 +66,7 @@ every `/v1` route requires `Authorization: Bearer <token>` when
 | `PATCH` | `/v1/flags/:key` | Update a flag. | `enabled` (boolean), `description` (string), and/or `rolloutPercentage` (integer 0–100) — at least one | `200` `Flag` |
 | `DELETE` | `/v1/flags/:key` | Delete a flag. | `:key` path param | `204` (no body) |
 | `GET` | `/v1/flags/:key/evaluate` | Evaluate a flag (hot path for pollers). | `:key` path param; `?unit=<string>` (optional) buckets the unit for percentage rollouts | `200` `{ "key", "enabled", "rolloutPercentage"? }` |
-| `GET` | `/v1/flags/:key/history` | Change history for a flag. | `:key` path param | `200` `{ "key", "events": [FlagEvent] }` |
+| `GET` | `/v1/flags/:key/history` | Change history for a flag. | `:key` path param; `?limit=<n>` (optional) returns only the most recent `n` events (integer 1–500) | `200` `{ "key", "events": [FlagEvent] }` |
 
 ### The Flag object
 
@@ -127,6 +127,19 @@ never existed return `404`. History is persisted alongside flags when
 `FLAGPOLE_DATA_FILE` is set; data files written by older versions load
 fine and start with an empty history.
 
+Long-lived flags can accumulate a lot of events. Pass `?limit=<n>` (an
+integer from 1 to 500) to get only the most recent `n` events; the
+response stays oldest-first, so a limited result is always a suffix of
+the full trail:
+
+```bash
+curl -s 'http://localhost:3333/v1/flags/new-checkout/history?limit=2'
+# {"key":"new-checkout","events":[ ...the two most recent events... ]}
+```
+
+A `limit` outside that range (or not an integer) returns `400`
+`invalid_limit`.
+
 ### Errors
 
 Every error uses the same envelope:
@@ -143,6 +156,7 @@ Every error uses the same envelope:
 | `400` | `invalid_description` | `description` is not a string. |
 | `400` | `invalid_rollout_percentage` | `rolloutPercentage` is not an integer between 0 and 100. |
 | `400` | `empty_update` | PATCH body has none of `enabled`, `description`, or `rolloutPercentage`. |
+| `400` | `invalid_limit` | History `limit` is not an integer between 1 and 500. |
 | `401` | `unauthorized` | Missing or wrong bearer token. |
 | `404` | `flag_not_found` | No flag with that key. |
 | `404` | `not_found` | Unknown route. |
