@@ -698,3 +698,48 @@ describe("file persistence", () => {
     expect(await res.json()).toEqual({ key: "old", events: [] });
   });
 });
+
+describe("DELETE /v1/tags/:tag", () => {
+  it("removes the tag from every flag carrying it and reports the count", async () => {
+    const app = makeApp();
+    await app.request("/v1/flags", json({ key: "a", enabled: true, tags: ["beta", "ops"] }));
+    await app.request("/v1/flags", json({ key: "b", enabled: false, tags: ["beta"] }));
+    await app.request("/v1/flags", json({ key: "c", enabled: true, tags: ["ops"] }));
+
+    const res = await app.request("/v1/tags/beta", { method: "DELETE" });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ tag: "beta", removedFrom: 2 });
+
+    const a = await (await app.request("/v1/flags/a")).json();
+    expect(a.tags).toEqual(["ops"]);
+    const b = await (await app.request("/v1/flags/b")).json();
+    expect(b.tags).toBeUndefined();
+    const listed = await (await app.request("/v1/tags")).json();
+    expect(listed.tags).toEqual([{ tag: "ops", count: 2 }]);
+  });
+
+  it("404s with tag_not_found when no live flag carries the tag", async () => {
+    const app = makeApp();
+    await app.request("/v1/flags", json({ key: "a", enabled: true, tags: ["beta"] }));
+    const res = await app.request("/v1/tags/missing", { method: "DELETE" });
+    expect(res.status).toBe(404);
+    expect((await res.json()).error.code).toBe("tag_not_found");
+  });
+
+  it("records an updated history event on each affected flag", async () => {
+    const app = makeApp();
+    await app.request("/v1/flags", json({ key: "a", enabled: true, tags: ["beta"] }));
+    await app.request("/v1/tags/beta", { method: "DELETE" });
+    const history = await (await app.request("/v1/flags/a/history")).json();
+    expect(history.events.map((e: { type: string }) => e.type)).toEqual([
+      "created",
+      "updated",
+    ]);
+  });
+
+  it("requires auth when a token is configured", async () => {
+    const app = makeApp("secret");
+    const res = await app.request("/v1/tags/beta", { method: "DELETE" });
+    expect(res.status).toBe(401);
+  });
+});

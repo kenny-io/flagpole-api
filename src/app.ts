@@ -132,6 +132,27 @@ export function createApp({ store, apiToken }: AppOptions): Hono {
     return c.json({ tags });
   });
 
+  // Retire a tag everywhere in one call. Removes the tag from every flag
+  // carrying it (the flags themselves are untouched otherwise) and reports
+  // how many flags were affected, so bulk cleanups don't require a
+  // per-flag PATCH loop. 404s when no live flag carries the tag.
+  v1.delete("/tags/:tag", (c) => {
+    const tag = c.req.param("tag");
+    const affected = store.list().filter((flag) => flag.tags?.includes(tag));
+    if (affected.length === 0) {
+      return c.json(
+        errorBody("tag_not_found", `No flag carries the tag "${tag}".`),
+        404,
+      );
+    }
+    for (const flag of affected) {
+      store.update(flag.key, {
+        tags: (flag.tags ?? []).filter((existing) => existing !== tag),
+      });
+    }
+    return c.json({ tag, removedFrom: affected.length });
+  });
+
   v1.post("/flags", async (c) => {
     let body: unknown;
     try {

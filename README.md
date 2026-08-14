@@ -68,6 +68,7 @@ every `/v1` route requires `Authorization: Bearer <token>` when
 | `GET` | `/v1/flags/:key/evaluate` | Evaluate a flag (hot path for pollers). | `:key` path param; `?unit=<string>` (optional) buckets the unit for percentage rollouts | `200` `{ "key", "enabled", "rolloutPercentage"? }` |
 | `GET` | `/v1/flags/:key/history` | Change history for a flag. | `:key` path param; `?limit=<n>` (optional) returns only the most recent `n` events (integer 1–500) | `200` `{ "key", "events": [FlagEvent] }` |
 | `GET` | `/v1/tags` | List distinct tags across all flags with usage counts. | — | `200` `{ "tags": [{ "tag", "count" }] }` |
+| `DELETE` | `/v1/tags/:tag` | Retire a tag: remove it from every flag carrying it. | `:tag` path param | `200` `{ "tag", "removedFrom" }` |
 
 ### The Flag object
 
@@ -147,6 +148,12 @@ and an empty `?tag=` is treated as absent. Tags are persisted with the
 flag when `FLAGPOLE_DATA_FILE` is set, and tag changes appear in the
 flag's history like any other field.
 
+`DELETE /v1/tags/:tag` retires a tag across the whole flag set in one
+call: the tag is removed from every flag carrying it and the response
+reports how many flags were affected. The flags themselves are otherwise
+untouched, each affected flag records an `updated` history event, and the
+call returns `404` `tag_not_found` when no live flag carries the tag.
+
 ### Change history
 
 Every create, update, and delete is recorded, and
@@ -198,6 +205,7 @@ Every error uses the same envelope:
 | `400` | `invalid_enabled` | `enabled` is not a boolean. |
 | `400` | `invalid_description` | `description` is not a string. |
 | `400` | `invalid_rollout_percentage` | `rolloutPercentage` is not an integer between 0 and 100. |
+| `404` | `tag_not_found` | `DELETE /v1/tags/:tag` named a tag that no live flag carries. |
 | `400` | `invalid_tags` | `tags` is not an array of up to 10 unique lowercase kebab-case strings (1–50 chars each). |
 | `400` | `empty_update` | PATCH body has none of `enabled`, `description`, `rolloutPercentage`, or `tags`. |
 | `400` | `invalid_limit` | History `limit` is not an integer between 1 and 500. |
