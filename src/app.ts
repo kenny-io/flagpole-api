@@ -30,6 +30,12 @@ const errorBody = (code: string, message: string) => ({
   error: { code, message },
 });
 
+/**
+ * Upper bound for the history `limit` query param. Generous enough for any
+ * realistic audit view while capping the response size a client can request.
+ */
+const MAX_HISTORY_LIMIT = 500;
+
 /** Valid rollout percentages are integers 0-100 inclusive. */
 const isValidRolloutPercentage = (value: unknown): value is number =>
   typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 100;
@@ -183,13 +189,35 @@ export function createApp({ store, apiToken }: AppOptions): Hono {
 
   v1.get("/flags/:key/history", (c) => {
     const key = c.req.param("key");
+    // An empty `?limit=` is treated as absent, mirroring how `/evaluate`
+    // handles an empty `unit`, so callers that always append the param
+    // get the full history rather than an error.
+    const limitParam = c.req.query("limit");
+    let limit: number | undefined;
+    if (limitParam) {
+      // Strict digit parse: `Number()` alone would accept "1e2" and
+      // "0x10", which we don't want to silently honor in an API contract.
+      limit = /^\d+$/.test(limitParam) ? Number(limitParam) : NaN;
+      if (!Number.isInteger(limit) || limit < 1 || limit > MAX_HISTORY_LIMIT) {
+        return c.json(
+          errorBody(
+            "invalid_limit",
+            `\`limit\` must be a positive integer no greater than ${MAX_HISTORY_LIMIT}.`,
+          ),
+          400,
+        );
+      }
+    }
     // History outlives the flag: a deleted flag still answers with its
     // events (ending in "deleted"); only never-created keys 404.
     const events = store.history(key);
     if (!events) {
       return c.json(errorBody("flag_not_found", "No flag with that key."), 404);
     }
-    return c.json({ key, events });
+    // `limit` keeps the most recent events but preserves oldest-first
+    // ordering, so a limited response is always a suffix of the full one.
+    const limited = limit !== undefined ? events.slice(-limit) : events;
+    return c.json({ key, events: limited });
   });
 
   app.route("/v1", v1);

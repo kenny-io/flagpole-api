@@ -324,6 +324,54 @@ describe("GET /v1/flags/:key/history", () => {
     expect(res.status).toBe(404);
     expect((await res.json()).error.code).toBe("flag_not_found");
   });
+
+  it("returns only the most recent events when ?limit is set, oldest-first", async () => {
+    const app = makeApp();
+    await app.request("/v1/flags", json({ key: "a", enabled: false }));
+    await app.request("/v1/flags/a", { ...json({ enabled: true }), method: "PATCH" });
+    await app.request("/v1/flags/a", { ...json({ description: "note" }), method: "PATCH" });
+
+    const res = await app.request("/v1/flags/a/history?limit=2");
+    expect(res.status).toBe(200);
+    const { events } = await res.json();
+    expect(events).toHaveLength(2);
+    expect(events[0]).toMatchObject({ type: "updated", changes: { enabled: true } });
+    expect(events[1]).toMatchObject({ type: "updated", changes: { description: "note" } });
+  });
+
+  it("returns the full history when limit exceeds the event count", async () => {
+    const app = makeApp();
+    await app.request("/v1/flags", json({ key: "a", enabled: true }));
+    const res = await app.request("/v1/flags/a/history?limit=500");
+    expect(res.status).toBe(200);
+    expect((await res.json()).events).toHaveLength(1);
+  });
+
+  it("treats an empty ?limit= as absent", async () => {
+    const app = makeApp();
+    await app.request("/v1/flags", json({ key: "a", enabled: true }));
+    await app.request("/v1/flags/a", { ...json({ enabled: false }), method: "PATCH" });
+    const res = await app.request("/v1/flags/a/history?limit=");
+    expect(res.status).toBe(200);
+    expect((await res.json()).events).toHaveLength(2);
+  });
+
+  it("rejects a non-integer, zero, negative, or oversized limit with 400", async () => {
+    const app = makeApp();
+    await app.request("/v1/flags", json({ key: "a", enabled: true }));
+    for (const limit of ["abc", "1.5", "0", "-3", "501", "1e2"]) {
+      const res = await app.request(`/v1/flags/a/history?limit=${limit}`);
+      expect(res.status).toBe(400);
+      expect((await res.json()).error.code).toBe("invalid_limit");
+    }
+  });
+
+  it("validates limit before checking flag existence", async () => {
+    const app = makeApp();
+    const res = await app.request("/v1/flags/ghost/history?limit=0");
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe("invalid_limit");
+  });
 });
 
 describe("bearer-token auth", () => {
