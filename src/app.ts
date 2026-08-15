@@ -129,6 +129,11 @@ export function createApp({ store, apiToken }: AppOptions): Hono {
     return c.json({ total: flags.length, enabled, disabled: flags.length - enabled });
   });
 
+  // Compact discovery endpoint for clients that only need stable flag keys.
+  v1.get("/flags/keys", (c) =>
+    c.json({ keys: store.list().map((flag) => flag.key) }),
+  );
+
   v1.get("/tags", (c) => {
     const counts = new Map<string, number>();
     for (const flag of store.list()) {
