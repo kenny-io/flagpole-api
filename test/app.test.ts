@@ -34,7 +34,7 @@ describe("GET /version", () => {
     const app = makeApp("secret");
     const res = await app.request("/version");
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ version: "0.3.0" });
+    expect(await res.json()).toEqual({ version: "0.4.0" });
   });
 });
 
