@@ -125,7 +125,9 @@ returns the plain boolean.
 
 Tags group related flags — by team, surface, launch, or anything else —
 so you can slice a growing flag list without a naming convention. Attach
-them on create or replace them later with a PATCH:
+them on create, replace them later with a PATCH, or add and remove one
+tag at a time with `PUT`/`DELETE /v1/flags/:key/tags/:tag`. To see every
+flag behind a tag, call `GET /v1/tags/:tag/flags`:
 
 ```bash
 curl -s -X POST http://localhost:3333/v1/flags \
