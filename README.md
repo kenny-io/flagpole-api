@@ -169,7 +169,11 @@ call returns `404` `tag_not_found` when no live flag carries the tag.
 ### Change history
 
 Every create, update, and delete is recorded, and
-`GET /v1/flags/:key/history` returns the events oldest-first:
+`GET /v1/flags/:key/history` returns the events oldest-first. History
+outlives the flag: a deleted flag still answers with its events (ending in
+`deleted`); only keys that were never created return `404`. Pass
+`?limit=<n>` to keep just the most recent `n` events — the response is
+always a suffix of the full list, so ordering never changes:
 
 ```json
 {
