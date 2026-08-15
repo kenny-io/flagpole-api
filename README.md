@@ -66,6 +66,7 @@ every `/v1` route requires `Authorization: Bearer <token>` when
 | `POST` | `/v1/flags` | Create a flag. | `key` (string, required), `enabled` (boolean, required), `description` (string, optional), `rolloutPercentage` (integer 0–100, optional), `tags` (array of strings, optional) | `201` `Flag` |
 | `GET` | `/v1/flags/:key` | Fetch one flag. | `:key` path param | `200` `Flag` |
 | `GET` | `/v1/flags/:key/status` | Read only a flag's master switch. | `:key` path param | `200` `{ "key", "enabled" }` |
+| `GET` | `/v1/flags/:key/rollout` | Read only a flag's percentage rollout policy. | `:key` path param | `200` `{ "key", "rolloutPercentage" }` |
 | `PATCH` | `/v1/flags/:key` | Update a flag. | `enabled` (boolean), `description` (string), `rolloutPercentage` (integer 0–100), and/or `tags` (array of strings) — at least one | `200` `Flag` |
 | `POST` | `/v1/flags/:key/toggle` | Flip a flag's `enabled` state without a body. | `:key` path param | `200` `Flag` |
 | `DELETE` | `/v1/flags/:key` | Delete a flag. | `:key` path param | `204` (no body) |
