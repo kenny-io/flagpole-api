@@ -194,6 +194,19 @@ describe("PATCH /v1/flags/:key", () => {
   });
 });
 
+describe("GET /v1/flags/:key/tags", () => {
+  it("lists a flag's tags and 404s for unknown flags", async () => {
+    const app = makeApp();
+    await app.request("/v1/flags", json({ key: "search", enabled: true, tags: ["beta"] }));
+    const res = await app.request("/v1/flags/search/tags");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ key: "search", tags: ["beta"] });
+    await app.request("/v1/flags", json({ key: "plain", enabled: false }));
+    expect(await (await app.request("/v1/flags/plain/tags")).json()).toEqual({ key: "plain", tags: [] });
+    expect((await app.request("/v1/flags/nope/tags")).status).toBe(404);
+  });
+});
+
 describe("PUT /v1/flags/:key/tags/:tag", () => {
   it("attaches a tag idempotently and validates it", async () => {
     const app = makeApp();
