@@ -251,6 +251,17 @@ describe("GET /v1/flags/count", () => {
   });
 });
 
+describe("GET /v1/flags/keys", () => {
+  it("returns only the live flag keys", async () => {
+    const app = makeApp();
+    await app.request("/v1/flags", json({ key: "checkout", enabled: true }));
+    await app.request("/v1/flags", json({ key: "search", enabled: false }));
+    expect(await (await app.request("/v1/flags/keys")).json()).toEqual({
+      keys: ["checkout", "search"],
+    });
+  });
+});
+
 describe("POST /v1/flags/:key/toggle", () => {
   it("flips enabled and returns the updated flag", async () => {
     const app = makeApp();
