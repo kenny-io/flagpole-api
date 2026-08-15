@@ -69,6 +69,7 @@ every `/v1` route requires `Authorization: Bearer <token>` when
 | `GET` | `/v1/flags/:key/evaluate` | Evaluate a flag (hot path for pollers). | `:key` path param; `?unit=<string>` (optional) buckets the unit for percentage rollouts | `200` `{ "key", "enabled", "rolloutPercentage"? }` |
 | `GET` | `/v1/flags/:key/history` | Change history for a flag. | `:key` path param; `?limit=<n>` (optional) returns only the most recent `n` events (integer 1–500) | `200` `{ "key", "events": [FlagEvent] }` |
 | `PUT` | `/v1/flags/:key/tags/:tag` | Attach one tag to a flag (idempotent). | `:key` and `:tag` path params; the same tag rules as `tags` apply | `200` `Flag` |
+| `DELETE` | `/v1/flags/:key/tags/:tag` | Detach one tag from a flag (idempotent). | `:key` and `:tag` path params | `200` `Flag` |
 | `GET` | `/v1/tags` | List distinct tags across all flags with usage counts. | — | `200` `{ "tags": [{ "tag", "count" }] }` |
 | `DELETE` | `/v1/tags/:tag` | Retire a tag: remove it from every flag carrying it. | `:tag` path param | `200` `{ "tag", "removedFrom" }` |
 

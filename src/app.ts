@@ -158,6 +158,25 @@ export function createApp({ store, apiToken }: AppOptions): Hono {
     return c.json(updated);
   });
 
+  v1.delete("/flags/:key/tags/:tag", (c) => {
+    // Counterpart of the single-tag attach. Removing a tag the flag does not
+    // carry is a no-op success so labelers can converge without a read.
+    const key = c.req.param("key");
+    const tag = c.req.param("tag");
+    const flag = store.get(key);
+    if (!flag) {
+      return c.json(errorBody("flag_not_found", "No flag with that key."), 404);
+    }
+    const current = flag.tags ?? [];
+    if (!current.includes(tag)) {
+      return c.json(flag);
+    }
+    const updated = store.update(key, {
+      tags: current.filter((existing) => existing !== tag),
+    });
+    return c.json(updated);
+  });
+
   v1.delete("/tags/:tag", (c) => {
     const tag = c.req.param("tag");
     const affected = store.list().filter((flag) => flag.tags?.includes(tag));

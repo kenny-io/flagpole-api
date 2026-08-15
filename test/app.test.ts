@@ -211,6 +211,21 @@ describe("PUT /v1/flags/:key/tags/:tag", () => {
   });
 });
 
+describe("DELETE /v1/flags/:key/tags/:tag", () => {
+  it("detaches a tag idempotently", async () => {
+    const app = makeApp();
+    await app.request("/v1/flags", json({ key: "search", enabled: true, tags: ["beta", "web"] }));
+    const res = await app.request("/v1/flags/search/tags/beta", { method: "DELETE" });
+    expect(res.status).toBe(200);
+    expect((await res.json()).tags).toEqual(["web"]);
+    const again = await app.request("/v1/flags/search/tags/beta", { method: "DELETE" });
+    expect(again.status).toBe(200);
+    expect((await again.json()).tags).toEqual(["web"]);
+    const missing = await app.request("/v1/flags/nope/tags/web", { method: "DELETE" });
+    expect(missing.status).toBe(404);
+  });
+});
+
 describe("POST /v1/flags/:key/toggle", () => {
   it("flips enabled and returns the updated flag", async () => {
     const app = makeApp();
