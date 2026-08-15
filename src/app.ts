@@ -270,6 +270,16 @@ export function createApp({ store, apiToken }: AppOptions): Hono {
     return c.json(flag, 201);
   });
 
+  v1.get("/flags/:key/status", (c) => {
+    // Lightweight control-plane read for dashboards that need the master
+    // switch without descriptions, tags, rollout metadata, or history.
+    const flag = store.get(c.req.param("key"));
+    if (!flag) {
+      return c.json(errorBody("flag_not_found", "No flag with that key."), 404);
+    }
+    return c.json({ key: flag.key, enabled: flag.enabled });
+  });
+
   v1.get("/flags/:key", (c) => {
     const flag = store.get(c.req.param("key"));
     if (!flag) {

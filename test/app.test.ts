@@ -141,6 +141,18 @@ describe("GET /v1/flags/:key", () => {
   });
 });
 
+describe("GET /v1/flags/:key/status", () => {
+  it("returns only the master switch and 404s unknown keys", async () => {
+    const app = makeApp();
+    await app.request("/v1/flags", json({ key: "checkout", enabled: false }));
+    expect(await (await app.request("/v1/flags/checkout/status")).json()).toEqual({
+      key: "checkout",
+      enabled: false,
+    });
+    expect((await app.request("/v1/flags/missing/status")).status).toBe(404);
+  });
+});
+
 describe("PATCH /v1/flags/:key", () => {
   it("updates enabled and bumps updatedAt", async () => {
     const app = makeApp();
