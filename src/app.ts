@@ -280,6 +280,19 @@ export function createApp({ store, apiToken }: AppOptions): Hono {
     return c.json({ key: flag.key, enabled: flag.enabled });
   });
 
+  v1.get("/flags/:key/rollout", (c) => {
+    // Lightweight rollout read for clients that already cache the master
+    // switch and only need the current percentage policy.
+    const flag = store.get(c.req.param("key"));
+    if (!flag) {
+      return c.json(errorBody("flag_not_found", "No flag with that key."), 404);
+    }
+    return c.json({
+      key: flag.key,
+      rolloutPercentage: flag.rolloutPercentage ?? null,
+    });
+  });
+
   v1.get("/flags/:key", (c) => {
     const flag = store.get(c.req.param("key"));
     if (!flag) {

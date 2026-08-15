@@ -153,6 +153,24 @@ describe("GET /v1/flags/:key/status", () => {
   });
 });
 
+describe("GET /v1/flags/:key/rollout", () => {
+  it("returns the rollout percentage without the full flag", async () => {
+    const app = makeApp();
+    await app.request(
+      "/v1/flags",
+      json({ key: "checkout", enabled: true, rolloutPercentage: 35 }),
+    );
+    await app.request("/v1/flags", json({ key: "search", enabled: true }));
+    expect(
+      await (await app.request("/v1/flags/checkout/rollout")).json(),
+    ).toEqual({ key: "checkout", rolloutPercentage: 35 });
+    expect(
+      await (await app.request("/v1/flags/search/rollout")).json(),
+    ).toEqual({ key: "search", rolloutPercentage: null });
+    expect((await app.request("/v1/flags/missing/rollout")).status).toBe(404);
+  });
+});
+
 describe("PATCH /v1/flags/:key", () => {
   it("updates enabled and bumps updatedAt", async () => {
     const app = makeApp();
