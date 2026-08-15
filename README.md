@@ -64,6 +64,7 @@ every `/v1` route requires `Authorization: Bearer <token>` when
 | `POST` | `/v1/flags` | Create a flag. | `key` (string, required), `enabled` (boolean, required), `description` (string, optional), `rolloutPercentage` (integer 0–100, optional), `tags` (array of strings, optional) | `201` `Flag` |
 | `GET` | `/v1/flags/:key` | Fetch one flag. | `:key` path param | `200` `Flag` |
 | `PATCH` | `/v1/flags/:key` | Update a flag. | `enabled` (boolean), `description` (string), `rolloutPercentage` (integer 0–100), and/or `tags` (array of strings) — at least one | `200` `Flag` |
+| `POST` | `/v1/flags/:key/toggle` | Flip a flag's `enabled` state without a body. | `:key` path param | `200` `Flag` |
 | `DELETE` | `/v1/flags/:key` | Delete a flag. | `:key` path param | `204` (no body) |
 | `GET` | `/v1/flags/:key/evaluate` | Evaluate a flag (hot path for pollers). | `:key` path param; `?unit=<string>` (optional) buckets the unit for percentage rollouts | `200` `{ "key", "enabled", "rolloutPercentage"? }` |
 | `GET` | `/v1/flags/:key/history` | Change history for a flag. | `:key` path param; `?limit=<n>` (optional) returns only the most recent `n` events (integer 1–500) | `200` `{ "key", "events": [FlagEvent] }` |

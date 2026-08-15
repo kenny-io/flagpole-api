@@ -268,6 +268,19 @@ export function createApp({ store, apiToken }: AppOptions): Hono {
     return c.json(updated);
   });
 
+  v1.post("/flags/:key/toggle", (c) => {
+    // A body-free flip for kill-switch scripts and chat-ops: it avoids the
+    // read-then-PATCH round trip that can race a concurrent update, and it
+    // records the same "updated" history event PATCH would.
+    const key = c.req.param("key");
+    const flag = store.get(key);
+    if (!flag) {
+      return c.json(errorBody("flag_not_found", "No flag with that key."), 404);
+    }
+    const updated = store.update(key, { enabled: !flag.enabled });
+    return c.json(updated);
+  });
+
   v1.delete("/flags/:key", (c) => {
     const removed = store.delete(c.req.param("key"));
     if (!removed) {
