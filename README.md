@@ -7,6 +7,9 @@ dashboard, no SDK lock-in, no database required — just an HTTP server your
 services can query. Run it in memory for ephemeral environments, or point it
 at a JSON file for durable, human-inspectable storage.
 
+Version 0.2.0 adds a public `GET /version` endpoint so deploy checks can verify
+the running API release without credentials.
+
 ## Why Flagpole
 
 - **Tiny surface area.** Nine endpoints. You can read the whole API reference below in a minute.
@@ -53,13 +56,14 @@ curl -s http://localhost:3333/v1/flags \
 
 ## API reference
 
-All request and response bodies are JSON. `GET /health` is always public;
+All request and response bodies are JSON. `GET /health` and `GET /version` are always public;
 every `/v1` route requires `Authorization: Bearer <token>` when
 `FLAGPOLE_API_TOKEN` is set.
 
 | Method | Path | Description | Body / params | Success |
 | ------ | ---- | ----------- | ------------- | ------- |
 | `GET` | `/health` | Liveness check. | — | `200` `{ "status": "ok" }` |
+| `GET` | `/version` | Running API release. | — | `200` `{ "version": "0.2.0" }` |
 | `GET` | `/v1/flags` | List all flags. | `?tag=<t>` (optional) returns only flags carrying that tag | `200` `{ "flags": [Flag] }` |
 | `GET` | `/v1/flags/count` | Count flags, split by enabled state. | — | `200` `{ "total", "enabled", "disabled" }` |
 | `GET` | `/v1/flags/keys` | List live flag keys without full objects. | — | `200` `{ "keys": [string] }` |

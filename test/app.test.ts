@@ -29,6 +29,15 @@ describe("GET /health", () => {
   });
 });
 
+describe("GET /version", () => {
+  it("reports the public API release without requiring auth", async () => {
+    const app = makeApp("secret");
+    const res = await app.request("/version");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ version: "0.2.0" });
+  });
+});
+
 describe("POST /v1/flags", () => {
   it("creates a flag and returns 201 with timestamps", async () => {
     const app = makeApp();
