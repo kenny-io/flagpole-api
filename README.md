@@ -7,7 +7,7 @@ dashboard, no SDK lock-in, no database required — just an HTTP server your
 services can query. Run it in memory for ephemeral environments, or point it
 at a JSON file for durable, human-inspectable storage.
 
-Version 0.2.0 adds a public `GET /version` endpoint so deploy checks can verify
+Version 0.3.0 includes a public `GET /version` endpoint so deploy checks can verify
 the running API release without credentials.
 
 ## Why Flagpole
@@ -63,7 +63,7 @@ every `/v1` route requires `Authorization: Bearer <token>` when
 | Method | Path | Description | Body / params | Success |
 | ------ | ---- | ----------- | ------------- | ------- |
 | `GET` | `/health` | Liveness check. | — | `200` `{ "status": "ok" }` |
-| `GET` | `/version` | Running API release. | — | `200` `{ "version": "0.2.0" }` |
+| `GET` | `/version` | Running API release. | — | `200` `{ "version": "0.3.0" }` |
 | `GET` | `/v1/flags` | List all flags. | `?tag=<t>` (optional) returns only flags carrying that tag | `200` `{ "flags": [Flag] }` |
 | `GET` | `/v1/flags/count` | Count flags, split by enabled state. | — | `200` `{ "total", "enabled", "disabled" }` |
 | `GET` | `/v1/flags/keys` | List live flag keys without full objects. | — | `200` `{ "keys": [string] }` |
