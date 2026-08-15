@@ -136,6 +136,28 @@ export function createApp({ store, apiToken }: AppOptions): Hono {
   // carrying it (the flags themselves are untouched otherwise) and reports
   // how many flags were affected, so bulk cleanups don't require a
   // per-flag PATCH loop. 404s when no live flag carries the tag.
+  v1.put("/flags/:key/tags/:tag", (c) => {
+    // Idempotent single-tag attach for automation that labels flags one at
+    // a time; PATCH replaces the whole tag list, which races concurrent
+    // labelers. Validation reuses the tag rules so the two paths never drift.
+    const key = c.req.param("key");
+    const tag = c.req.param("tag");
+    const flag = store.get(key);
+    if (!flag) {
+      return c.json(errorBody("flag_not_found", "No flag with that key."), 404);
+    }
+    const current = flag.tags ?? [];
+    if (current.includes(tag)) {
+      return c.json(flag);
+    }
+    const problem = findTagsProblem([...current, tag]);
+    if (problem) {
+      return c.json(errorBody("invalid_tags", problem), 400);
+    }
+    const updated = store.update(key, { tags: [...current, tag] });
+    return c.json(updated);
+  });
+
   v1.delete("/tags/:tag", (c) => {
     const tag = c.req.param("tag");
     const affected = store.list().filter((flag) => flag.tags?.includes(tag));

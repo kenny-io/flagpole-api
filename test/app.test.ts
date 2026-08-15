@@ -194,6 +194,23 @@ describe("PATCH /v1/flags/:key", () => {
   });
 });
 
+describe("PUT /v1/flags/:key/tags/:tag", () => {
+  it("attaches a tag idempotently and validates it", async () => {
+    const app = makeApp();
+    await app.request("/v1/flags", json({ key: "search", enabled: true, tags: ["beta"] }));
+    const res = await app.request("/v1/flags/search/tags/web", { method: "PUT" });
+    expect(res.status).toBe(200);
+    expect((await res.json()).tags).toEqual(["beta", "web"]);
+    const again = await app.request("/v1/flags/search/tags/web", { method: "PUT" });
+    expect((await again.json()).tags).toEqual(["beta", "web"]);
+    const bad = await app.request("/v1/flags/search/tags/Not_Valid", { method: "PUT" });
+    expect(bad.status).toBe(400);
+    expect((await bad.json()).error.code).toBe("invalid_tags");
+    const missing = await app.request("/v1/flags/nope/tags/web", { method: "PUT" });
+    expect(missing.status).toBe(404);
+  });
+});
+
 describe("POST /v1/flags/:key/toggle", () => {
   it("flips enabled and returns the updated flag", async () => {
     const app = makeApp();
