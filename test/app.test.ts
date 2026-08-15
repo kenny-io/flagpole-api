@@ -194,6 +194,25 @@ describe("PATCH /v1/flags/:key", () => {
   });
 });
 
+describe("POST /v1/flags/:key/toggle", () => {
+  it("flips enabled and returns the updated flag", async () => {
+    const app = makeApp();
+    await app.request("/v1/flags", json({ key: "dark-mode", enabled: false }));
+    const res = await app.request("/v1/flags/dark-mode/toggle", { method: "POST" });
+    expect(res.status).toBe(200);
+    expect((await res.json()).enabled).toBe(true);
+    const again = await app.request("/v1/flags/dark-mode/toggle", { method: "POST" });
+    expect((await again.json()).enabled).toBe(false);
+  });
+
+  it("returns 404 for an unknown flag", async () => {
+    const app = makeApp();
+    const res = await app.request("/v1/flags/nope/toggle", { method: "POST" });
+    expect(res.status).toBe(404);
+    expect((await res.json()).error.code).toBe("flag_not_found");
+  });
+});
+
 describe("DELETE /v1/flags/:key", () => {
   it("deletes and returns 204, then the flag is gone", async () => {
     const app = makeApp();
