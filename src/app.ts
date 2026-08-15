@@ -82,6 +82,7 @@ export function createApp({ store, apiToken }: AppOptions): Hono {
   const app = new Hono();
 
   app.get("/health", (c) => c.json({ status: "ok" }));
+  app.get("/version", (c) => c.json({ version: "0.2.0" }));
 
   const v1 = new Hono();
 
