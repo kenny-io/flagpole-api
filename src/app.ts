@@ -203,6 +203,20 @@ export function createApp({ store, apiToken }: AppOptions): Hono {
     return c.json(updated);
   });
 
+  v1.get("/tags/:tag/flags", (c) => {
+    // Path-based counterpart of `GET /v1/flags?tag=`: 404 for a tag no live
+    // flag carries, so dashboards can distinguish "unknown tag" from "empty".
+    const tag = c.req.param("tag");
+    const flags = store.list().filter((flag) => flag.tags?.includes(tag));
+    if (flags.length === 0) {
+      return c.json(
+        errorBody("tag_not_found", `No flag carries the tag "${tag}".`),
+        404,
+      );
+    }
+    return c.json({ tag, flags });
+  });
+
   v1.delete("/tags/:tag", (c) => {
     const tag = c.req.param("tag");
     const affected = store.list().filter((flag) => flag.tags?.includes(tag));

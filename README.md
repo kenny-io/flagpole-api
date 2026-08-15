@@ -80,6 +80,7 @@ every `/v1` route requires `Authorization: Bearer <token>` when
 | `PUT` | `/v1/flags/:key/tags/:tag` | Attach one tag to a flag (idempotent). | `:key` and `:tag` path params; the same tag rules as `tags` apply | `200` `Flag` |
 | `DELETE` | `/v1/flags/:key/tags/:tag` | Detach one tag from a flag (idempotent). | `:key` and `:tag` path params | `200` `Flag` |
 | `GET` | `/v1/tags` | List distinct tags across all flags with usage counts. | — | `200` `{ "tags": [{ "tag", "count" }] }` |
+| `GET` | `/v1/tags/:tag/flags` | List the flags carrying one tag. | `:tag` path param | `200` `{ "tag", "flags": [Flag] }` (`404` `tag_not_found` when no live flag carries it) |
 | `DELETE` | `/v1/tags/:tag` | Retire a tag: remove it from every flag carrying it. | `:tag` path param | `200` `{ "tag", "removedFrom" }` |
 
 ### The Flag object
