@@ -119,6 +119,16 @@ export function createApp({ store, apiToken }: AppOptions): Hono {
   // Distinct tags across all flags with usage counts, sorted by tag name so
   // the response is stable regardless of flag creation order. Deleted flags
   // no longer contribute — this reflects the live flag set only.
+  v1.get("/flags/count", (c) => {
+    // Cheap cardinality for dashboards that only need a number, split by
+    // enabled state so a poller can watch kill-switch churn without paying
+    // for the full list. Registered before /flags/:key so "count" is never
+    // read as a flag key.
+    const flags = store.list();
+    const enabled = flags.filter((flag) => flag.enabled).length;
+    return c.json({ total: flags.length, enabled, disabled: flags.length - enabled });
+  });
+
   v1.get("/tags", (c) => {
     const counts = new Map<string, number>();
     for (const flag of store.list()) {
