@@ -239,6 +239,18 @@ describe("DELETE /v1/flags/:key/tags/:tag", () => {
   });
 });
 
+describe("GET /v1/flags/count", () => {
+  it("counts flags by enabled state and never treats count as a key", async () => {
+    const app = makeApp();
+    expect(await (await app.request("/v1/flags/count")).json()).toEqual({ total: 0, enabled: 0, disabled: 0 });
+    await app.request("/v1/flags", json({ key: "a", enabled: true }));
+    await app.request("/v1/flags", json({ key: "b", enabled: false }));
+    const res = await app.request("/v1/flags/count");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ total: 2, enabled: 1, disabled: 1 });
+  });
+});
+
 describe("POST /v1/flags/:key/toggle", () => {
   it("flips enabled and returns the updated flag", async () => {
     const app = makeApp();

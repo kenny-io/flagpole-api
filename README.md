@@ -61,6 +61,7 @@ every `/v1` route requires `Authorization: Bearer <token>` when
 | ------ | ---- | ----------- | ------------- | ------- |
 | `GET` | `/health` | Liveness check. | — | `200` `{ "status": "ok" }` |
 | `GET` | `/v1/flags` | List all flags. | `?tag=<t>` (optional) returns only flags carrying that tag | `200` `{ "flags": [Flag] }` |
+| `GET` | `/v1/flags/count` | Count flags, split by enabled state. | — | `200` `{ "total", "enabled", "disabled" }` |
 | `POST` | `/v1/flags` | Create a flag. | `key` (string, required), `enabled` (boolean, required), `description` (string, optional), `rolloutPercentage` (integer 0–100, optional), `tags` (array of strings, optional) | `201` `Flag` |
 | `GET` | `/v1/flags/:key` | Fetch one flag. | `:key` path param | `200` `Flag` |
 | `PATCH` | `/v1/flags/:key` | Update a flag. | `enabled` (boolean), `description` (string), `rolloutPercentage` (integer 0–100), and/or `tags` (array of strings) — at least one | `200` `Flag` |
