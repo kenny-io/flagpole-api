@@ -7,6 +7,9 @@ dashboard, no SDK lock-in, no database required — just an HTTP server your
 services can query. Run it in memory for ephemeral environments, or point it
 at a JSON file for durable, human-inspectable storage.
 
+Version 0.2.0 adds a public `GET /version` endpoint so deploy checks can verify
+the running API release without credentials.
+
 ## Why Flagpole
 
 - **Tiny surface area.** Nine endpoints. You can read the whole API reference below in a minute.
@@ -53,30 +56,31 @@ curl -s http://localhost:3333/v1/flags \
 
 ## API reference
 
-All request and response bodies are JSON. `GET /health` is always public;
+All request and response bodies are JSON. `GET /health` and `GET /version` are always public;
 every `/v1` route requires `Authorization: Bearer <token>` when
 `FLAGPOLE_API_TOKEN` is set.
 
-| Method | Path | Description | Body / params | Success |
-| ------ | ---- | ----------- | ------------- | ------- |
-| `GET` | `/health` | Liveness check. | — | `200` `{ "status": "ok" }` |
-| `GET` | `/v1/flags` | List all flags. | `?tag=<t>` (optional) returns only flags carrying that tag | `200` `{ "flags": [Flag] }` |
-| `GET` | `/v1/flags/count` | Count flags, split by enabled state. | — | `200` `{ "total", "enabled", "disabled" }` |
-| `GET` | `/v1/flags/keys` | List live flag keys without full objects. | — | `200` `{ "keys": [string] }` |
-| `POST` | `/v1/flags` | Create a flag. | `key` (string, required), `enabled` (boolean, required), `description` (string, optional), `rolloutPercentage` (integer 0–100, optional), `tags` (array of strings, optional) | `201` `Flag` |
-| `GET` | `/v1/flags/:key` | Fetch one flag. | `:key` path param | `200` `Flag` |
-| `GET` | `/v1/flags/:key/status` | Read only a flag's master switch. | `:key` path param | `200` `{ "key", "enabled" }` |
-| `GET` | `/v1/flags/:key/rollout` | Read only a flag's percentage rollout policy. | `:key` path param | `200` `{ "key", "rolloutPercentage" }` |
-| `PATCH` | `/v1/flags/:key` | Update a flag. | `enabled` (boolean), `description` (string), `rolloutPercentage` (integer 0–100), and/or `tags` (array of strings) — at least one | `200` `Flag` |
-| `POST` | `/v1/flags/:key/toggle` | Flip a flag's `enabled` state without a body. | `:key` path param | `200` `Flag` |
-| `DELETE` | `/v1/flags/:key` | Delete a flag. | `:key` path param | `204` (no body) |
-| `GET` | `/v1/flags/:key/evaluate` | Evaluate a flag (hot path for pollers). | `:key` path param; `?unit=<string>` (optional) buckets the unit for percentage rollouts | `200` `{ "key", "enabled", "rolloutPercentage"? }` |
-| `GET` | `/v1/flags/:key/history` | Change history for a flag. | `:key` path param; `?limit=<n>` (optional) returns only the most recent `n` events (integer 1–500) | `200` `{ "key", "events": [FlagEvent] }` |
-| `GET` | `/v1/flags/:key/tags` | List a flag's tags. | `:key` path param | `200` `{ "key", "tags": [string] }` |
-| `PUT` | `/v1/flags/:key/tags/:tag` | Attach one tag to a flag (idempotent). | `:key` and `:tag` path params; the same tag rules as `tags` apply | `200` `Flag` |
-| `DELETE` | `/v1/flags/:key/tags/:tag` | Detach one tag from a flag (idempotent). | `:key` and `:tag` path params | `200` `Flag` |
-| `GET` | `/v1/tags` | List distinct tags across all flags with usage counts. | — | `200` `{ "tags": [{ "tag", "count" }] }` |
-| `DELETE` | `/v1/tags/:tag` | Retire a tag: remove it from every flag carrying it. | `:tag` path param | `200` `{ "tag", "removedFrom" }` |
+| Method   | Path                       | Description                                            | Body / params                                                                                                                                                                 | Success                                            |
+| -------- | -------------------------- | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| `GET`    | `/health`                  | Liveness check.                                        | —                                                                                                                                                                             | `200` `{ "status": "ok" }`                         |
+| `GET`    | `/version`                 | Running API release.                                   | —                                                                                                                                                                             | `200` `{ "version": "0.2.0" }`                     |
+| `GET`    | `/v1/flags`                | List all flags.                                        | `?tag=<t>` (optional) returns only flags carrying that tag                                                                                                                    | `200` `{ "flags": [Flag] }`                        |
+| `GET`    | `/v1/flags/count`          | Count flags, split by enabled state.                   | —                                                                                                                                                                             | `200` `{ "total", "enabled", "disabled" }`         |
+| `GET`    | `/v1/flags/keys`           | List live flag keys without full objects.              | —                                                                                                                                                                             | `200` `{ "keys": [string] }`                       |
+| `POST`   | `/v1/flags`                | Create a flag.                                         | `key` (string, required), `enabled` (boolean, required), `description` (string, optional), `rolloutPercentage` (integer 0–100, optional), `tags` (array of strings, optional) | `201` `Flag`                                       |
+| `GET`    | `/v1/flags/:key`           | Fetch one flag.                                        | `:key` path param                                                                                                                                                             | `200` `Flag`                                       |
+| `GET`    | `/v1/flags/:key/status`    | Read only a flag's master switch.                      | `:key` path param                                                                                                                                                             | `200` `{ "key", "enabled" }`                       |
+| `GET`    | `/v1/flags/:key/rollout`   | Read only a flag's percentage rollout policy.          | `:key` path param                                                                                                                                                             | `200` `{ "key", "rolloutPercentage" }`             |
+| `PATCH`  | `/v1/flags/:key`           | Update a flag.                                         | `enabled` (boolean), `description` (string), `rolloutPercentage` (integer 0–100), and/or `tags` (array of strings) — at least one                                             | `200` `Flag`                                       |
+| `POST`   | `/v1/flags/:key/toggle`    | Flip a flag's `enabled` state without a body.          | `:key` path param                                                                                                                                                             | `200` `Flag`                                       |
+| `DELETE` | `/v1/flags/:key`           | Delete a flag.                                         | `:key` path param                                                                                                                                                             | `204` (no body)                                    |
+| `GET`    | `/v1/flags/:key/evaluate`  | Evaluate a flag (hot path for pollers).                | `:key` path param; `?unit=<string>` (optional) buckets the unit for percentage rollouts                                                                                       | `200` `{ "key", "enabled", "rolloutPercentage"? }` |
+| `GET`    | `/v1/flags/:key/history`   | Change history for a flag.                             | `:key` path param; `?limit=<n>` (optional) returns only the most recent `n` events (integer 1–500)                                                                            | `200` `{ "key", "events": [FlagEvent] }`           |
+| `GET`    | `/v1/flags/:key/tags`      | List a flag's tags.                                    | `:key` path param                                                                                                                                                             | `200` `{ "key", "tags": [string] }`                |
+| `PUT`    | `/v1/flags/:key/tags/:tag` | Attach one tag to a flag (idempotent).                 | `:key` and `:tag` path params; the same tag rules as `tags` apply                                                                                                             | `200` `Flag`                                       |
+| `DELETE` | `/v1/flags/:key/tags/:tag` | Detach one tag from a flag (idempotent).               | `:key` and `:tag` path params                                                                                                                                                 | `200` `Flag`                                       |
+| `GET`    | `/v1/tags`                 | List distinct tags across all flags with usage counts. | —                                                                                                                                                                             | `200` `{ "tags": [{ "tag", "count" }] }`           |
+| `DELETE` | `/v1/tags/:tag`            | Retire a tag: remove it from every flag carrying it.   | `:tag` path param                                                                                                                                                             | `200` `{ "tag", "removedFrom" }`                   |
 
 ### The Flag object
 
@@ -171,8 +175,16 @@ Every create, update, and delete is recorded, and
 {
   "key": "new-checkout",
   "events": [
-    { "type": "created", "at": "2026-08-13T12:00:00.000Z", "changes": { "description": "New checkout flow", "enabled": true } },
-    { "type": "updated", "at": "2026-08-13T14:30:00.000Z", "changes": { "rolloutPercentage": 25 } },
+    {
+      "type": "created",
+      "at": "2026-08-13T12:00:00.000Z",
+      "changes": { "description": "New checkout flow", "enabled": true }
+    },
+    {
+      "type": "updated",
+      "at": "2026-08-13T14:30:00.000Z",
+      "changes": { "rolloutPercentage": 25 }
+    },
     { "type": "deleted", "at": "2026-08-14T09:00:00.000Z", "changes": {} }
   ]
 }
@@ -206,30 +218,30 @@ Every error uses the same envelope:
 { "error": { "code": "flag_not_found", "message": "No flag with that key." } }
 ```
 
-| Status | Code | When |
-| ------ | ---- | ---- |
-| `400` | `invalid_json` | Body is not valid JSON. |
-| `400` | `invalid_key` | Missing or malformed `key` on create. |
-| `400` | `invalid_enabled` | `enabled` is not a boolean. |
-| `400` | `invalid_description` | `description` is not a string. |
-| `400` | `invalid_rollout_percentage` | `rolloutPercentage` is not an integer between 0 and 100. |
-| `404` | `tag_not_found` | `DELETE /v1/tags/:tag` named a tag that no live flag carries. |
-| `400` | `invalid_tags` | `tags` is not an array of up to 10 unique lowercase kebab-case strings (1–50 chars each). |
-| `400` | `empty_update` | PATCH body has none of `enabled`, `description`, `rolloutPercentage`, or `tags`. |
-| `400` | `invalid_limit` | History `limit` is not an integer between 1 and 500. |
-| `401` | `unauthorized` | Missing or wrong bearer token. |
-| `404` | `flag_not_found` | No flag with that key. |
-| `404` | `not_found` | Unknown route. |
-| `409` | `flag_exists` | Create with a key that already exists. |
+| Status | Code                         | When                                                                                      |
+| ------ | ---------------------------- | ----------------------------------------------------------------------------------------- |
+| `400`  | `invalid_json`               | Body is not valid JSON.                                                                   |
+| `400`  | `invalid_key`                | Missing or malformed `key` on create.                                                     |
+| `400`  | `invalid_enabled`            | `enabled` is not a boolean.                                                               |
+| `400`  | `invalid_description`        | `description` is not a string.                                                            |
+| `400`  | `invalid_rollout_percentage` | `rolloutPercentage` is not an integer between 0 and 100.                                  |
+| `404`  | `tag_not_found`              | `DELETE /v1/tags/:tag` named a tag that no live flag carries.                             |
+| `400`  | `invalid_tags`               | `tags` is not an array of up to 10 unique lowercase kebab-case strings (1–50 chars each). |
+| `400`  | `empty_update`               | PATCH body has none of `enabled`, `description`, `rolloutPercentage`, or `tags`.          |
+| `400`  | `invalid_limit`              | History `limit` is not an integer between 1 and 500.                                      |
+| `401`  | `unauthorized`               | Missing or wrong bearer token.                                                            |
+| `404`  | `flag_not_found`             | No flag with that key.                                                                    |
+| `404`  | `not_found`                  | Unknown route.                                                                            |
+| `409`  | `flag_exists`                | Create with a key that already exists.                                                    |
 
 ## Configuration
 
 All configuration is via environment variables. Everything is optional.
 
-| Variable | Default | Description |
-| -------- | ------- | ----------- |
-| `PORT` | `3333` | Port the HTTP server listens on. |
-| `FLAGPOLE_API_TOKEN` | _(unset)_ | Bearer token required on all `/v1` routes. **Unset disables auth entirely (dev mode)** — never expose an unauthenticated instance. |
+| Variable             | Default   | Description                                                                                                                                                              |
+| -------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `PORT`               | `3333`    | Port the HTTP server listens on.                                                                                                                                         |
+| `FLAGPOLE_API_TOKEN` | _(unset)_ | Bearer token required on all `/v1` routes. **Unset disables auth entirely (dev mode)** — never expose an unauthenticated instance.                                       |
 | `FLAGPOLE_DATA_FILE` | _(unset)_ | Path to a JSON file for persistence of flags and their change history. Loaded at startup, rewritten atomically on every mutation. Unset keeps everything in memory only. |
 
 ## Development

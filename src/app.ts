@@ -38,7 +38,10 @@ const MAX_HISTORY_LIMIT = 500;
 
 /** Valid rollout percentages are integers 0-100 inclusive. */
 const isValidRolloutPercentage = (value: unknown): value is number =>
-  typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 100;
+  typeof value === "number" &&
+  Number.isInteger(value) &&
+  value >= 0 &&
+  value <= 100;
 
 /** A flag carries at most this many tags. */
 const MAX_TAGS_PER_FLAG = 10;
@@ -82,6 +85,7 @@ export function createApp({ store, apiToken }: AppOptions): Hono {
   const app = new Hono();
 
   app.get("/health", (c) => c.json({ status: "ok" }));
+  app.get("/version", (c) => c.json({ version: "0.2.0" }));
 
   const v1 = new Hono();
 
@@ -126,7 +130,11 @@ export function createApp({ store, apiToken }: AppOptions): Hono {
     // read as a flag key.
     const flags = store.list();
     const enabled = flags.filter((flag) => flag.enabled).length;
-    return c.json({ total: flags.length, enabled, disabled: flags.length - enabled });
+    return c.json({
+      total: flags.length,
+      enabled,
+      disabled: flags.length - enabled,
+    });
   });
 
   // Compact discovery endpoint for clients that only need stable flag keys.
@@ -224,10 +232,14 @@ export function createApp({ store, apiToken }: AppOptions): Hono {
     try {
       body = await c.req.json();
     } catch {
-      return c.json(errorBody("invalid_json", "Request body must be valid JSON."), 400);
+      return c.json(
+        errorBody("invalid_json", "Request body must be valid JSON."),
+        400,
+      );
     }
 
-    const { key, description, enabled, rolloutPercentage, tags } = (body ?? {}) as Record<string, unknown>;
+    const { key, description, enabled, rolloutPercentage, tags } = (body ??
+      {}) as Record<string, unknown>;
 
     if (typeof key !== "string" || !FLAG_KEY_PATTERN.test(key)) {
       return c.json(
@@ -239,14 +251,29 @@ export function createApp({ store, apiToken }: AppOptions): Hono {
       );
     }
     if (typeof enabled !== "boolean") {
-      return c.json(errorBody("invalid_enabled", "`enabled` is required and must be a boolean."), 400);
+      return c.json(
+        errorBody(
+          "invalid_enabled",
+          "`enabled` is required and must be a boolean.",
+        ),
+        400,
+      );
     }
     if (description !== undefined && typeof description !== "string") {
-      return c.json(errorBody("invalid_description", "`description` must be a string."), 400);
-    }
-    if (rolloutPercentage !== undefined && !isValidRolloutPercentage(rolloutPercentage)) {
       return c.json(
-        errorBody("invalid_rollout_percentage", "`rolloutPercentage` must be an integer between 0 and 100."),
+        errorBody("invalid_description", "`description` must be a string."),
+        400,
+      );
+    }
+    if (
+      rolloutPercentage !== undefined &&
+      !isValidRolloutPercentage(rolloutPercentage)
+    ) {
+      return c.json(
+        errorBody(
+          "invalid_rollout_percentage",
+          "`rolloutPercentage` must be an integer between 0 and 100.",
+        ),
         400,
       );
     }
@@ -257,7 +284,10 @@ export function createApp({ store, apiToken }: AppOptions): Hono {
       }
     }
     if (store.has(key)) {
-      return c.json(errorBody("flag_exists", `A flag with key "${key}" already exists.`), 409);
+      return c.json(
+        errorBody("flag_exists", `A flag with key "${key}" already exists.`),
+        409,
+      );
     }
 
     const flag = store.create({
@@ -306,20 +336,36 @@ export function createApp({ store, apiToken }: AppOptions): Hono {
     try {
       body = await c.req.json();
     } catch {
-      return c.json(errorBody("invalid_json", "Request body must be valid JSON."), 400);
+      return c.json(
+        errorBody("invalid_json", "Request body must be valid JSON."),
+        400,
+      );
     }
 
-    const { description, enabled, rolloutPercentage, tags } = (body ?? {}) as Record<string, unknown>;
+    const { description, enabled, rolloutPercentage, tags } = (body ??
+      {}) as Record<string, unknown>;
 
     if (enabled !== undefined && typeof enabled !== "boolean") {
-      return c.json(errorBody("invalid_enabled", "`enabled` must be a boolean."), 400);
+      return c.json(
+        errorBody("invalid_enabled", "`enabled` must be a boolean."),
+        400,
+      );
     }
     if (description !== undefined && typeof description !== "string") {
-      return c.json(errorBody("invalid_description", "`description` must be a string."), 400);
-    }
-    if (rolloutPercentage !== undefined && !isValidRolloutPercentage(rolloutPercentage)) {
       return c.json(
-        errorBody("invalid_rollout_percentage", "`rolloutPercentage` must be an integer between 0 and 100."),
+        errorBody("invalid_description", "`description` must be a string."),
+        400,
+      );
+    }
+    if (
+      rolloutPercentage !== undefined &&
+      !isValidRolloutPercentage(rolloutPercentage)
+    ) {
+      return c.json(
+        errorBody(
+          "invalid_rollout_percentage",
+          "`rolloutPercentage` must be an integer between 0 and 100.",
+        ),
         400,
       );
     }
@@ -347,7 +393,8 @@ export function createApp({ store, apiToken }: AppOptions): Hono {
     const patch: UpdateFlagInput = {};
     if (enabled !== undefined) patch.enabled = enabled;
     if (description !== undefined) patch.description = description;
-    if (rolloutPercentage !== undefined) patch.rolloutPercentage = rolloutPercentage;
+    if (rolloutPercentage !== undefined)
+      patch.rolloutPercentage = rolloutPercentage;
     if (tags !== undefined) patch.tags = tags as string[];
 
     const updated = store.update(c.req.param("key"), patch);
@@ -388,9 +435,18 @@ export function createApp({ store, apiToken }: AppOptions): Hono {
     // the param get the plain boolean rather than a surprise bucket.
     const unitParam = c.req.query("unit");
     const unit = unitParam ? unitParam : undefined;
-    const enabled = isEnabledForUnit(flag.key, flag.enabled, flag.rolloutPercentage, unit);
+    const enabled = isEnabledForUnit(
+      flag.key,
+      flag.enabled,
+      flag.rolloutPercentage,
+      unit,
+    );
     // Minimal payload on purpose: this is the hot path SDKs poll.
-    const result: { key: string; enabled: boolean; rolloutPercentage?: number } = {
+    const result: {
+      key: string;
+      enabled: boolean;
+      rolloutPercentage?: number;
+    } = {
       key: flag.key,
       enabled,
     };

@@ -12,7 +12,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 import { createStore } from "../src/store.js";
 
-const makeApp = (apiToken?: string) => createApp({ store: createStore(), apiToken });
+const makeApp = (apiToken?: string) =>
+  createApp({ store: createStore(), apiToken });
 
 const json = (body: unknown): RequestInit => ({
   method: "POST",
@@ -29,12 +30,25 @@ describe("GET /health", () => {
   });
 });
 
+describe("GET /version", () => {
+  it("reports the public API release without requiring auth", async () => {
+    const app = makeApp("secret");
+    const res = await app.request("/version");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ version: "0.2.0" });
+  });
+});
+
 describe("POST /v1/flags", () => {
   it("creates a flag and returns 201 with timestamps", async () => {
     const app = makeApp();
     const res = await app.request(
       "/v1/flags",
-      json({ key: "new-checkout", description: "New checkout flow", enabled: true }),
+      json({
+        key: "new-checkout",
+        description: "New checkout flow",
+        enabled: true,
+      }),
     );
     expect(res.status).toBe(201);
     const flag = await res.json();
@@ -49,14 +63,21 @@ describe("POST /v1/flags", () => {
 
   it("defaults description to an empty string", async () => {
     const app = makeApp();
-    const res = await app.request("/v1/flags", json({ key: "bare", enabled: false }));
+    const res = await app.request(
+      "/v1/flags",
+      json({ key: "bare", enabled: false }),
+    );
     expect(res.status).toBe(201);
     expect((await res.json()).description).toBe("");
   });
 
   it("rejects a missing or malformed key with 400", async () => {
     const app = makeApp();
-    for (const body of [{ enabled: true }, { key: "has spaces", enabled: true }, { key: "", enabled: true }]) {
+    for (const body of [
+      { enabled: true },
+      { key: "has spaces", enabled: true },
+      { key: "", enabled: true },
+    ]) {
       const res = await app.request("/v1/flags", json(body));
       expect(res.status).toBe(400);
       expect((await res.json()).error.code).toBe("invalid_key");
@@ -65,7 +86,10 @@ describe("POST /v1/flags", () => {
 
   it("rejects a non-boolean enabled with 400", async () => {
     const app = makeApp();
-    const res = await app.request("/v1/flags", json({ key: "x", enabled: "yes" }));
+    const res = await app.request(
+      "/v1/flags",
+      json({ key: "x", enabled: "yes" }),
+    );
     expect(res.status).toBe(400);
     expect((await res.json()).error.code).toBe("invalid_enabled");
   });
@@ -83,7 +107,10 @@ describe("POST /v1/flags", () => {
 
   it("accepts a valid rolloutPercentage", async () => {
     const app = makeApp();
-    const res = await app.request("/v1/flags", json({ key: "gradual", enabled: true, rolloutPercentage: 25 }));
+    const res = await app.request(
+      "/v1/flags",
+      json({ key: "gradual", enabled: true, rolloutPercentage: 25 }),
+    );
     expect(res.status).toBe(201);
     expect((await res.json()).rolloutPercentage).toBe(25);
   });
@@ -91,7 +118,10 @@ describe("POST /v1/flags", () => {
   it("rejects an invalid rolloutPercentage with 400", async () => {
     const app = makeApp();
     for (const rolloutPercentage of [-1, 101, 12.5, "50", null, true]) {
-      const res = await app.request("/v1/flags", json({ key: "bad", enabled: true, rolloutPercentage }));
+      const res = await app.request(
+        "/v1/flags",
+        json({ key: "bad", enabled: true, rolloutPercentage }),
+      );
       expect(res.status).toBe(400);
       expect((await res.json()).error.code).toBe("invalid_rollout_percentage");
     }
@@ -99,14 +129,20 @@ describe("POST /v1/flags", () => {
 
   it("omits rolloutPercentage from the flag when not provided", async () => {
     const app = makeApp();
-    const res = await app.request("/v1/flags", json({ key: "plain", enabled: true }));
+    const res = await app.request(
+      "/v1/flags",
+      json({ key: "plain", enabled: true }),
+    );
     expect(await res.json()).not.toHaveProperty("rolloutPercentage");
   });
 
   it("rejects a duplicate key with 409", async () => {
     const app = makeApp();
     await app.request("/v1/flags", json({ key: "dupe", enabled: true }));
-    const res = await app.request("/v1/flags", json({ key: "dupe", enabled: false }));
+    const res = await app.request(
+      "/v1/flags",
+      json({ key: "dupe", enabled: false }),
+    );
     expect(res.status).toBe(409);
     expect((await res.json()).error.code).toBe("flag_exists");
   });
@@ -145,7 +181,9 @@ describe("GET /v1/flags/:key/status", () => {
   it("returns only the master switch and 404s unknown keys", async () => {
     const app = makeApp();
     await app.request("/v1/flags", json({ key: "checkout", enabled: false }));
-    expect(await (await app.request("/v1/flags/checkout/status")).json()).toEqual({
+    expect(
+      await (await app.request("/v1/flags/checkout/status")).json(),
+    ).toEqual({
       key: "checkout",
       enabled: false,
     });
@@ -174,18 +212,28 @@ describe("GET /v1/flags/:key/rollout", () => {
 describe("PATCH /v1/flags/:key", () => {
   it("updates enabled and bumps updatedAt", async () => {
     const app = makeApp();
-    const created = await (await app.request("/v1/flags", json({ key: "a", enabled: false }))).json();
-    const res = await app.request("/v1/flags/a", { ...json({ enabled: true }), method: "PATCH" });
+    const created = await (
+      await app.request("/v1/flags", json({ key: "a", enabled: false }))
+    ).json();
+    const res = await app.request("/v1/flags/a", {
+      ...json({ enabled: true }),
+      method: "PATCH",
+    });
     expect(res.status).toBe(200);
     const updated = await res.json();
     expect(updated.enabled).toBe(true);
-    expect(Date.parse(updated.updatedAt)).toBeGreaterThanOrEqual(Date.parse(created.createdAt));
+    expect(Date.parse(updated.updatedAt)).toBeGreaterThanOrEqual(
+      Date.parse(created.createdAt),
+    );
   });
 
   it("updates description independently of enabled", async () => {
     const app = makeApp();
     await app.request("/v1/flags", json({ key: "a", enabled: true }));
-    const res = await app.request("/v1/flags/a", { ...json({ description: "hi" }), method: "PATCH" });
+    const res = await app.request("/v1/flags/a", {
+      ...json({ description: "hi" }),
+      method: "PATCH",
+    });
     const updated = await res.json();
     expect(updated.description).toBe("hi");
     expect(updated.enabled).toBe(true);
@@ -194,7 +242,10 @@ describe("PATCH /v1/flags/:key", () => {
   it("400s on an empty patch body", async () => {
     const app = makeApp();
     await app.request("/v1/flags", json({ key: "a", enabled: true }));
-    const res = await app.request("/v1/flags/a", { ...json({}), method: "PATCH" });
+    const res = await app.request("/v1/flags/a", {
+      ...json({}),
+      method: "PATCH",
+    });
     expect(res.status).toBe(400);
     expect((await res.json()).error.code).toBe("empty_update");
   });
@@ -202,7 +253,10 @@ describe("PATCH /v1/flags/:key", () => {
   it("updates rolloutPercentage on its own", async () => {
     const app = makeApp();
     await app.request("/v1/flags", json({ key: "a", enabled: true }));
-    const res = await app.request("/v1/flags/a", { ...json({ rolloutPercentage: 40 }), method: "PATCH" });
+    const res = await app.request("/v1/flags/a", {
+      ...json({ rolloutPercentage: 40 }),
+      method: "PATCH",
+    });
     expect(res.status).toBe(200);
     const updated = await res.json();
     expect(updated.rolloutPercentage).toBe(40);
@@ -212,14 +266,20 @@ describe("PATCH /v1/flags/:key", () => {
   it("rejects an invalid rolloutPercentage with 400", async () => {
     const app = makeApp();
     await app.request("/v1/flags", json({ key: "a", enabled: true }));
-    const res = await app.request("/v1/flags/a", { ...json({ rolloutPercentage: 200 }), method: "PATCH" });
+    const res = await app.request("/v1/flags/a", {
+      ...json({ rolloutPercentage: 200 }),
+      method: "PATCH",
+    });
     expect(res.status).toBe(400);
     expect((await res.json()).error.code).toBe("invalid_rollout_percentage");
   });
 
   it("404s on an unknown key", async () => {
     const app = makeApp();
-    const res = await app.request("/v1/flags/ghost", { ...json({ enabled: true }), method: "PATCH" });
+    const res = await app.request("/v1/flags/ghost", {
+      ...json({ enabled: true }),
+      method: "PATCH",
+    });
     expect(res.status).toBe(404);
   });
 });
@@ -227,12 +287,18 @@ describe("PATCH /v1/flags/:key", () => {
 describe("GET /v1/flags/:key/tags", () => {
   it("lists a flag's tags and 404s for unknown flags", async () => {
     const app = makeApp();
-    await app.request("/v1/flags", json({ key: "search", enabled: true, tags: ["beta"] }));
+    await app.request(
+      "/v1/flags",
+      json({ key: "search", enabled: true, tags: ["beta"] }),
+    );
     const res = await app.request("/v1/flags/search/tags");
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ key: "search", tags: ["beta"] });
     await app.request("/v1/flags", json({ key: "plain", enabled: false }));
-    expect(await (await app.request("/v1/flags/plain/tags")).json()).toEqual({ key: "plain", tags: [] });
+    expect(await (await app.request("/v1/flags/plain/tags")).json()).toEqual({
+      key: "plain",
+      tags: [],
+    });
     expect((await app.request("/v1/flags/nope/tags")).status).toBe(404);
   });
 });
@@ -240,16 +306,27 @@ describe("GET /v1/flags/:key/tags", () => {
 describe("PUT /v1/flags/:key/tags/:tag", () => {
   it("attaches a tag idempotently and validates it", async () => {
     const app = makeApp();
-    await app.request("/v1/flags", json({ key: "search", enabled: true, tags: ["beta"] }));
-    const res = await app.request("/v1/flags/search/tags/web", { method: "PUT" });
+    await app.request(
+      "/v1/flags",
+      json({ key: "search", enabled: true, tags: ["beta"] }),
+    );
+    const res = await app.request("/v1/flags/search/tags/web", {
+      method: "PUT",
+    });
     expect(res.status).toBe(200);
     expect((await res.json()).tags).toEqual(["beta", "web"]);
-    const again = await app.request("/v1/flags/search/tags/web", { method: "PUT" });
+    const again = await app.request("/v1/flags/search/tags/web", {
+      method: "PUT",
+    });
     expect((await again.json()).tags).toEqual(["beta", "web"]);
-    const bad = await app.request("/v1/flags/search/tags/Not_Valid", { method: "PUT" });
+    const bad = await app.request("/v1/flags/search/tags/Not_Valid", {
+      method: "PUT",
+    });
     expect(bad.status).toBe(400);
     expect((await bad.json()).error.code).toBe("invalid_tags");
-    const missing = await app.request("/v1/flags/nope/tags/web", { method: "PUT" });
+    const missing = await app.request("/v1/flags/nope/tags/web", {
+      method: "PUT",
+    });
     expect(missing.status).toBe(404);
   });
 });
@@ -257,14 +334,23 @@ describe("PUT /v1/flags/:key/tags/:tag", () => {
 describe("DELETE /v1/flags/:key/tags/:tag", () => {
   it("detaches a tag idempotently", async () => {
     const app = makeApp();
-    await app.request("/v1/flags", json({ key: "search", enabled: true, tags: ["beta", "web"] }));
-    const res = await app.request("/v1/flags/search/tags/beta", { method: "DELETE" });
+    await app.request(
+      "/v1/flags",
+      json({ key: "search", enabled: true, tags: ["beta", "web"] }),
+    );
+    const res = await app.request("/v1/flags/search/tags/beta", {
+      method: "DELETE",
+    });
     expect(res.status).toBe(200);
     expect((await res.json()).tags).toEqual(["web"]);
-    const again = await app.request("/v1/flags/search/tags/beta", { method: "DELETE" });
+    const again = await app.request("/v1/flags/search/tags/beta", {
+      method: "DELETE",
+    });
     expect(again.status).toBe(200);
     expect((await again.json()).tags).toEqual(["web"]);
-    const missing = await app.request("/v1/flags/nope/tags/web", { method: "DELETE" });
+    const missing = await app.request("/v1/flags/nope/tags/web", {
+      method: "DELETE",
+    });
     expect(missing.status).toBe(404);
   });
 });
@@ -272,7 +358,11 @@ describe("DELETE /v1/flags/:key/tags/:tag", () => {
 describe("GET /v1/flags/count", () => {
   it("counts flags by enabled state and never treats count as a key", async () => {
     const app = makeApp();
-    expect(await (await app.request("/v1/flags/count")).json()).toEqual({ total: 0, enabled: 0, disabled: 0 });
+    expect(await (await app.request("/v1/flags/count")).json()).toEqual({
+      total: 0,
+      enabled: 0,
+      disabled: 0,
+    });
     await app.request("/v1/flags", json({ key: "a", enabled: true }));
     await app.request("/v1/flags", json({ key: "b", enabled: false }));
     const res = await app.request("/v1/flags/count");
@@ -296,10 +386,14 @@ describe("POST /v1/flags/:key/toggle", () => {
   it("flips enabled and returns the updated flag", async () => {
     const app = makeApp();
     await app.request("/v1/flags", json({ key: "dark-mode", enabled: false }));
-    const res = await app.request("/v1/flags/dark-mode/toggle", { method: "POST" });
+    const res = await app.request("/v1/flags/dark-mode/toggle", {
+      method: "POST",
+    });
     expect(res.status).toBe(200);
     expect((await res.json()).enabled).toBe(true);
-    const again = await app.request("/v1/flags/dark-mode/toggle", { method: "POST" });
+    const again = await app.request("/v1/flags/dark-mode/toggle", {
+      method: "POST",
+    });
     expect((await again.json()).enabled).toBe(false);
   });
 
@@ -330,7 +424,10 @@ describe("DELETE /v1/flags/:key", () => {
 describe("GET /v1/flags/:key/evaluate", () => {
   it("returns only key and enabled", async () => {
     const app = makeApp();
-    await app.request("/v1/flags", json({ key: "a", description: "d", enabled: true }));
+    await app.request(
+      "/v1/flags",
+      json({ key: "a", description: "d", enabled: true }),
+    );
     const res = await app.request("/v1/flags/a/evaluate");
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ key: "a", enabled: true });
@@ -344,37 +441,74 @@ describe("GET /v1/flags/:key/evaluate", () => {
 
   it("includes rolloutPercentage when the flag has one", async () => {
     const app = makeApp();
-    await app.request("/v1/flags", json({ key: "a", enabled: true, rolloutPercentage: 50 }));
+    await app.request(
+      "/v1/flags",
+      json({ key: "a", enabled: true, rolloutPercentage: 50 }),
+    );
     const res = await app.request("/v1/flags/a/evaluate");
-    expect(await res.json()).toEqual({ key: "a", enabled: true, rolloutPercentage: 50 });
+    expect(await res.json()).toEqual({
+      key: "a",
+      enabled: true,
+      rolloutPercentage: 50,
+    });
   });
 
   it("is deterministic for the same unit", async () => {
     const app = makeApp();
-    await app.request("/v1/flags", json({ key: "a", enabled: true, rolloutPercentage: 50 }));
-    const first = await (await app.request("/v1/flags/a/evaluate?unit=user-42")).json();
+    await app.request(
+      "/v1/flags",
+      json({ key: "a", enabled: true, rolloutPercentage: 50 }),
+    );
+    const first = await (
+      await app.request("/v1/flags/a/evaluate?unit=user-42")
+    ).json();
     for (let i = 0; i < 5; i++) {
-      const again = await (await app.request("/v1/flags/a/evaluate?unit=user-42")).json();
+      const again = await (
+        await app.request("/v1/flags/a/evaluate?unit=user-42")
+      ).json();
       expect(again.enabled).toBe(first.enabled);
     }
   });
 
   it("enables every unit at 100 and none at 0", async () => {
     const app = makeApp();
-    await app.request("/v1/flags", json({ key: "all", enabled: true, rolloutPercentage: 100 }));
-    await app.request("/v1/flags", json({ key: "none", enabled: true, rolloutPercentage: 0 }));
+    await app.request(
+      "/v1/flags",
+      json({ key: "all", enabled: true, rolloutPercentage: 100 }),
+    );
+    await app.request(
+      "/v1/flags",
+      json({ key: "none", enabled: true, rolloutPercentage: 0 }),
+    );
     for (const unit of ["u1", "u2", "u3"]) {
-      expect((await (await app.request(`/v1/flags/all/evaluate?unit=${unit}`)).json()).enabled).toBe(true);
-      expect((await (await app.request(`/v1/flags/none/evaluate?unit=${unit}`)).json()).enabled).toBe(false);
+      expect(
+        (
+          await (
+            await app.request(`/v1/flags/all/evaluate?unit=${unit}`)
+          ).json()
+        ).enabled,
+      ).toBe(true);
+      expect(
+        (
+          await (
+            await app.request(`/v1/flags/none/evaluate?unit=${unit}`)
+          ).json()
+        ).enabled,
+      ).toBe(false);
     }
   });
 
   it("splits units at a partial percentage", async () => {
     const app = makeApp();
-    await app.request("/v1/flags", json({ key: "half", enabled: true, rolloutPercentage: 50 }));
+    await app.request(
+      "/v1/flags",
+      json({ key: "half", enabled: true, rolloutPercentage: 50 }),
+    );
     const results = new Set<boolean>();
     for (let i = 0; i < 50; i++) {
-      const { enabled } = await (await app.request(`/v1/flags/half/evaluate?unit=user-${i}`)).json();
+      const { enabled } = await (
+        await app.request(`/v1/flags/half/evaluate?unit=user-${i}`)
+      ).json();
       results.add(enabled);
     }
     // With 50 distinct units at 50%, both outcomes must occur.
@@ -383,14 +517,20 @@ describe("GET /v1/flags/:key/evaluate", () => {
 
   it("keeps a disabled flag off for every unit regardless of percentage", async () => {
     const app = makeApp();
-    await app.request("/v1/flags", json({ key: "a", enabled: false, rolloutPercentage: 100 }));
+    await app.request(
+      "/v1/flags",
+      json({ key: "a", enabled: false, rolloutPercentage: 100 }),
+    );
     const res = await app.request("/v1/flags/a/evaluate?unit=user-1");
     expect((await res.json()).enabled).toBe(false);
   });
 
   it("falls back to the plain boolean when no unit is given", async () => {
     const app = makeApp();
-    await app.request("/v1/flags", json({ key: "a", enabled: true, rolloutPercentage: 0 }));
+    await app.request(
+      "/v1/flags",
+      json({ key: "a", enabled: true, rolloutPercentage: 0 }),
+    );
     const res = await app.request("/v1/flags/a/evaluate");
     expect((await res.json()).enabled).toBe(true);
   });
@@ -406,8 +546,14 @@ describe("GET /v1/flags/:key/evaluate", () => {
 describe("GET /v1/flags/:key/history", () => {
   it("records created, updated, and deleted events in order", async () => {
     const app = makeApp();
-    await app.request("/v1/flags", json({ key: "a", description: "d", enabled: false }));
-    await app.request("/v1/flags/a", { ...json({ enabled: true, rolloutPercentage: 10 }), method: "PATCH" });
+    await app.request(
+      "/v1/flags",
+      json({ key: "a", description: "d", enabled: false }),
+    );
+    await app.request("/v1/flags/a", {
+      ...json({ enabled: true, rolloutPercentage: 10 }),
+      method: "PATCH",
+    });
     await app.request("/v1/flags/a", { method: "DELETE" });
 
     const res = await app.request("/v1/flags/a/history");
@@ -430,7 +576,10 @@ describe("GET /v1/flags/:key/history", () => {
   it("records only the patched fields on update", async () => {
     const app = makeApp();
     await app.request("/v1/flags", json({ key: "a", enabled: true }));
-    await app.request("/v1/flags/a", { ...json({ description: "note" }), method: "PATCH" });
+    await app.request("/v1/flags/a", {
+      ...json({ description: "note" }),
+      method: "PATCH",
+    });
     const { events } = await (await app.request("/v1/flags/a/history")).json();
     expect(events[1].changes).toEqual({ description: "note" });
   });
@@ -445,15 +594,27 @@ describe("GET /v1/flags/:key/history", () => {
   it("returns only the most recent events when ?limit is set, oldest-first", async () => {
     const app = makeApp();
     await app.request("/v1/flags", json({ key: "a", enabled: false }));
-    await app.request("/v1/flags/a", { ...json({ enabled: true }), method: "PATCH" });
-    await app.request("/v1/flags/a", { ...json({ description: "note" }), method: "PATCH" });
+    await app.request("/v1/flags/a", {
+      ...json({ enabled: true }),
+      method: "PATCH",
+    });
+    await app.request("/v1/flags/a", {
+      ...json({ description: "note" }),
+      method: "PATCH",
+    });
 
     const res = await app.request("/v1/flags/a/history?limit=2");
     expect(res.status).toBe(200);
     const { events } = await res.json();
     expect(events).toHaveLength(2);
-    expect(events[0]).toMatchObject({ type: "updated", changes: { enabled: true } });
-    expect(events[1]).toMatchObject({ type: "updated", changes: { description: "note" } });
+    expect(events[0]).toMatchObject({
+      type: "updated",
+      changes: { enabled: true },
+    });
+    expect(events[1]).toMatchObject({
+      type: "updated",
+      changes: { description: "note" },
+    });
   });
 
   it("returns the full history when limit exceeds the event count", async () => {
@@ -467,7 +628,10 @@ describe("GET /v1/flags/:key/history", () => {
   it("treats an empty ?limit= as absent", async () => {
     const app = makeApp();
     await app.request("/v1/flags", json({ key: "a", enabled: true }));
-    await app.request("/v1/flags/a", { ...json({ enabled: false }), method: "PATCH" });
+    await app.request("/v1/flags/a", {
+      ...json({ enabled: false }),
+      method: "PATCH",
+    });
     const res = await app.request("/v1/flags/a/history?limit=");
     expect(res.status).toBe(200);
     expect((await res.json()).events).toHaveLength(2);
@@ -504,22 +668,35 @@ describe("flag tags", () => {
 
   it("omits tags from the flag when not provided", async () => {
     const app = makeApp();
-    const res = await app.request("/v1/flags", json({ key: "a", enabled: true }));
+    const res = await app.request(
+      "/v1/flags",
+      json({ key: "a", enabled: true }),
+    );
     expect(await res.json()).not.toHaveProperty("tags");
   });
 
   it("treats an empty tags array on create as no tags", async () => {
     const app = makeApp();
-    const res = await app.request("/v1/flags", json({ key: "a", enabled: true, tags: [] }));
+    const res = await app.request(
+      "/v1/flags",
+      json({ key: "a", enabled: true, tags: [] }),
+    );
     expect(res.status).toBe(201);
     expect(await res.json()).not.toHaveProperty("tags");
   });
 
   it("accepts up to 10 tags and single-character or 50-character tags", async () => {
     const app = makeApp();
-    const tags = [...Array.from({ length: 8 }, (_, i) => `tag-${i}`), "x", "a".repeat(50)];
+    const tags = [
+      ...Array.from({ length: 8 }, (_, i) => `tag-${i}`),
+      "x",
+      "a".repeat(50),
+    ];
     expect(tags).toHaveLength(10);
-    const res = await app.request("/v1/flags", json({ key: "a", enabled: true, tags }));
+    const res = await app.request(
+      "/v1/flags",
+      json({ key: "a", enabled: true, tags }),
+    );
     expect(res.status).toBe(201);
     expect((await res.json()).tags).toEqual(tags);
   });
@@ -527,7 +704,10 @@ describe("flag tags", () => {
   it("rejects more than 10 tags with 400 invalid_tags", async () => {
     const app = makeApp();
     const tags = Array.from({ length: 11 }, (_, i) => `tag-${i}`);
-    const res = await app.request("/v1/flags", json({ key: "a", enabled: true, tags }));
+    const res = await app.request(
+      "/v1/flags",
+      json({ key: "a", enabled: true, tags }),
+    );
     expect(res.status).toBe(400);
     expect((await res.json()).error.code).toBe("invalid_tags");
   });
@@ -548,7 +728,10 @@ describe("flag tags", () => {
       ["under_score"],
     ];
     for (const tags of badTagSets) {
-      const res = await app.request("/v1/flags", json({ key: "a", enabled: true, tags }));
+      const res = await app.request(
+        "/v1/flags",
+        json({ key: "a", enabled: true, tags }),
+      );
       expect(res.status).toBe(400);
       expect((await res.json()).error.code).toBe("invalid_tags");
     }
@@ -566,16 +749,28 @@ describe("flag tags", () => {
 
   it("replaces the whole tag set on PATCH", async () => {
     const app = makeApp();
-    await app.request("/v1/flags", json({ key: "a", enabled: true, tags: ["old", "stale"] }));
-    const res = await app.request("/v1/flags/a", { ...json({ tags: ["fresh"] }), method: "PATCH" });
+    await app.request(
+      "/v1/flags",
+      json({ key: "a", enabled: true, tags: ["old", "stale"] }),
+    );
+    const res = await app.request("/v1/flags/a", {
+      ...json({ tags: ["fresh"] }),
+      method: "PATCH",
+    });
     expect(res.status).toBe(200);
     expect((await res.json()).tags).toEqual(["fresh"]);
   });
 
   it("clears all tags when PATCHed with an empty array", async () => {
     const app = makeApp();
-    await app.request("/v1/flags", json({ key: "a", enabled: true, tags: ["beta"] }));
-    const res = await app.request("/v1/flags/a", { ...json({ tags: [] }), method: "PATCH" });
+    await app.request(
+      "/v1/flags",
+      json({ key: "a", enabled: true, tags: ["beta"] }),
+    );
+    const res = await app.request("/v1/flags/a", {
+      ...json({ tags: [] }),
+      method: "PATCH",
+    });
     expect(res.status).toBe(200);
     expect(await res.json()).not.toHaveProperty("tags");
   });
@@ -583,7 +778,10 @@ describe("flag tags", () => {
   it("accepts a PATCH containing only tags", async () => {
     const app = makeApp();
     await app.request("/v1/flags", json({ key: "a", enabled: true }));
-    const res = await app.request("/v1/flags/a", { ...json({ tags: ["solo"] }), method: "PATCH" });
+    const res = await app.request("/v1/flags/a", {
+      ...json({ tags: ["solo"] }),
+      method: "PATCH",
+    });
     expect(res.status).toBe(200);
     const updated = await res.json();
     expect(updated.tags).toEqual(["solo"]);
@@ -593,16 +791,28 @@ describe("flag tags", () => {
   it("rejects invalid tags on PATCH with 400 invalid_tags", async () => {
     const app = makeApp();
     await app.request("/v1/flags", json({ key: "a", enabled: true }));
-    const res = await app.request("/v1/flags/a", { ...json({ tags: ["BAD"] }), method: "PATCH" });
+    const res = await app.request("/v1/flags/a", {
+      ...json({ tags: ["BAD"] }),
+      method: "PATCH",
+    });
     expect(res.status).toBe(400);
     expect((await res.json()).error.code).toBe("invalid_tags");
   });
 
   it("records tags in history on create, update, and clear", async () => {
     const app = makeApp();
-    await app.request("/v1/flags", json({ key: "a", enabled: true, tags: ["beta"] }));
-    await app.request("/v1/flags/a", { ...json({ tags: ["ga"] }), method: "PATCH" });
-    await app.request("/v1/flags/a", { ...json({ tags: [] }), method: "PATCH" });
+    await app.request(
+      "/v1/flags",
+      json({ key: "a", enabled: true, tags: ["beta"] }),
+    );
+    await app.request("/v1/flags/a", {
+      ...json({ tags: ["ga"] }),
+      method: "PATCH",
+    });
+    await app.request("/v1/flags/a", {
+      ...json({ tags: [] }),
+      method: "PATCH",
+    });
     const { events } = await (await app.request("/v1/flags/a/history")).json();
     expect(events[0].changes.tags).toEqual(["beta"]);
     expect(events[1].changes).toEqual({ tags: ["ga"] });
@@ -613,8 +823,14 @@ describe("flag tags", () => {
 describe("GET /v1/flags?tag=", () => {
   it("filters the list to flags carrying the tag", async () => {
     const app = makeApp();
-    await app.request("/v1/flags", json({ key: "a", enabled: true, tags: ["checkout", "beta"] }));
-    await app.request("/v1/flags", json({ key: "b", enabled: false, tags: ["search"] }));
+    await app.request(
+      "/v1/flags",
+      json({ key: "a", enabled: true, tags: ["checkout", "beta"] }),
+    );
+    await app.request(
+      "/v1/flags",
+      json({ key: "b", enabled: false, tags: ["search"] }),
+    );
     await app.request("/v1/flags", json({ key: "c", enabled: true }));
     const res = await app.request("/v1/flags?tag=checkout");
     expect(res.status).toBe(200);
@@ -624,7 +840,10 @@ describe("GET /v1/flags?tag=", () => {
 
   it("returns an empty list for a tag no flag carries", async () => {
     const app = makeApp();
-    await app.request("/v1/flags", json({ key: "a", enabled: true, tags: ["beta"] }));
+    await app.request(
+      "/v1/flags",
+      json({ key: "a", enabled: true, tags: ["beta"] }),
+    );
     const res = await app.request("/v1/flags?tag=ghost");
     expect(res.status).toBe(200);
     expect((await res.json()).flags).toEqual([]);
@@ -632,7 +851,10 @@ describe("GET /v1/flags?tag=", () => {
 
   it("treats an empty ?tag= as absent and lists everything", async () => {
     const app = makeApp();
-    await app.request("/v1/flags", json({ key: "a", enabled: true, tags: ["beta"] }));
+    await app.request(
+      "/v1/flags",
+      json({ key: "a", enabled: true, tags: ["beta"] }),
+    );
     await app.request("/v1/flags", json({ key: "b", enabled: true }));
     const res = await app.request("/v1/flags?tag=");
     expect(res.status).toBe(200);
@@ -643,9 +865,18 @@ describe("GET /v1/flags?tag=", () => {
 describe("GET /v1/tags", () => {
   it("lists distinct tags with counts, sorted by tag name", async () => {
     const app = makeApp();
-    await app.request("/v1/flags", json({ key: "a", enabled: true, tags: ["checkout", "beta"] }));
-    await app.request("/v1/flags", json({ key: "b", enabled: false, tags: ["beta"] }));
-    await app.request("/v1/flags", json({ key: "c", enabled: true, tags: ["search"] }));
+    await app.request(
+      "/v1/flags",
+      json({ key: "a", enabled: true, tags: ["checkout", "beta"] }),
+    );
+    await app.request(
+      "/v1/flags",
+      json({ key: "b", enabled: false, tags: ["beta"] }),
+    );
+    await app.request(
+      "/v1/flags",
+      json({ key: "c", enabled: true, tags: ["search"] }),
+    );
     const res = await app.request("/v1/tags");
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
@@ -667,8 +898,14 @@ describe("GET /v1/tags", () => {
 
   it("drops a deleted flag's tags from the counts", async () => {
     const app = makeApp();
-    await app.request("/v1/flags", json({ key: "a", enabled: true, tags: ["beta"] }));
-    await app.request("/v1/flags", json({ key: "b", enabled: true, tags: ["beta"] }));
+    await app.request(
+      "/v1/flags",
+      json({ key: "a", enabled: true, tags: ["beta"] }),
+    );
+    await app.request(
+      "/v1/flags",
+      json({ key: "b", enabled: true, tags: ["beta"] }),
+    );
     await app.request("/v1/flags/a", { method: "DELETE" });
     const { tags } = await (await app.request("/v1/tags")).json();
     expect(tags).toEqual([{ tag: "beta", count: 1 }]);
@@ -767,14 +1004,21 @@ describe("file persistence", () => {
 
     const first = createApp({ store: createStore(dataFile) });
     await first.request("/v1/flags", json({ key: "audited", enabled: true }));
-    await first.request("/v1/flags/audited", { ...json({ enabled: false }), method: "PATCH" });
+    await first.request("/v1/flags/audited", {
+      ...json({ enabled: false }),
+      method: "PATCH",
+    });
     await first.request("/v1/flags/audited", { method: "DELETE" });
 
     const second = createApp({ store: createStore(dataFile) });
     const res = await second.request("/v1/flags/audited/history");
     expect(res.status).toBe(200);
     const { events } = await res.json();
-    expect(events.map((e: { type: string }) => e.type)).toEqual(["created", "updated", "deleted"]);
+    expect(events.map((e: { type: string }) => e.type)).toEqual([
+      "created",
+      "updated",
+      "deleted",
+    ]);
   });
 
   it("persists tags to disk and reloads them in a new store", async () => {
@@ -782,7 +1026,10 @@ describe("file persistence", () => {
     const dataFile = join(dir, "flags.json");
 
     const first = createApp({ store: createStore(dataFile) });
-    await first.request("/v1/flags", json({ key: "tagged", enabled: true, tags: ["beta", "checkout"] }));
+    await first.request(
+      "/v1/flags",
+      json({ key: "tagged", enabled: true, tags: ["beta", "checkout"] }),
+    );
 
     const second = createApp({ store: createStore(dataFile) });
     const res = await second.request("/v1/flags/tagged");
@@ -819,9 +1066,18 @@ describe("file persistence", () => {
 describe("DELETE /v1/tags/:tag", () => {
   it("removes the tag from every flag carrying it and reports the count", async () => {
     const app = makeApp();
-    await app.request("/v1/flags", json({ key: "a", enabled: true, tags: ["beta", "ops"] }));
-    await app.request("/v1/flags", json({ key: "b", enabled: false, tags: ["beta"] }));
-    await app.request("/v1/flags", json({ key: "c", enabled: true, tags: ["ops"] }));
+    await app.request(
+      "/v1/flags",
+      json({ key: "a", enabled: true, tags: ["beta", "ops"] }),
+    );
+    await app.request(
+      "/v1/flags",
+      json({ key: "b", enabled: false, tags: ["beta"] }),
+    );
+    await app.request(
+      "/v1/flags",
+      json({ key: "c", enabled: true, tags: ["ops"] }),
+    );
 
     const res = await app.request("/v1/tags/beta", { method: "DELETE" });
     expect(res.status).toBe(200);
@@ -837,7 +1093,10 @@ describe("DELETE /v1/tags/:tag", () => {
 
   it("404s with tag_not_found when no live flag carries the tag", async () => {
     const app = makeApp();
-    await app.request("/v1/flags", json({ key: "a", enabled: true, tags: ["beta"] }));
+    await app.request(
+      "/v1/flags",
+      json({ key: "a", enabled: true, tags: ["beta"] }),
+    );
     const res = await app.request("/v1/tags/missing", { method: "DELETE" });
     expect(res.status).toBe(404);
     expect((await res.json()).error.code).toBe("tag_not_found");
@@ -845,7 +1104,10 @@ describe("DELETE /v1/tags/:tag", () => {
 
   it("records an updated history event on each affected flag", async () => {
     const app = makeApp();
-    await app.request("/v1/flags", json({ key: "a", enabled: true, tags: ["beta"] }));
+    await app.request(
+      "/v1/flags",
+      json({ key: "a", enabled: true, tags: ["beta"] }),
+    );
     await app.request("/v1/tags/beta", { method: "DELETE" });
     const history = await (await app.request("/v1/flags/a/history")).json();
     expect(history.events.map((e: { type: string }) => e.type)).toEqual([
