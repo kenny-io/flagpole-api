@@ -301,6 +301,22 @@ describe("GET /v1/flags/keys", () => {
   });
 });
 
+describe("GET /v1/tags/:tag/flags", () => {
+  it("lists flags carrying a tag and 404s for unknown tags", async () => {
+    const app = makeApp();
+    await app.request("/v1/flags", json({ key: "a", enabled: true, tags: ["web"] }));
+    await app.request("/v1/flags", json({ key: "b", enabled: true, tags: ["api"] }));
+    const res = await app.request("/v1/tags/web/flags");
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.tag).toBe("web");
+    expect(body.flags.map((flag: { key: string }) => flag.key)).toEqual(["a"]);
+    const missing = await app.request("/v1/tags/nope/flags");
+    expect(missing.status).toBe(404);
+    expect((await missing.json()).error.code).toBe("tag_not_found");
+  });
+});
+
 describe("POST /v1/flags/:key/toggle", () => {
   it("flips enabled and returns the updated flag", async () => {
     const app = makeApp();
