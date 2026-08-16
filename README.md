@@ -64,7 +64,7 @@ every `/v1` route requires `Authorization: Bearer <token>` when
 | ------ | ---- | ----------- | ------------- | ------- |
 | `GET` | `/health` | Liveness check. | — | `200` `{ "status": "ok" }` |
 | `GET` | `/version` | Running API release. | — | `200` `{ "version": "0.4.0" }` |
-| `GET` | `/v1/flags` | List all flags. | `?tag=<t>` (optional) returns only flags carrying that tag | `200` `{ "flags": [Flag] }` |
+| `GET` | `/v1/flags` | List flags. | `?tag=<t>` (optional) filters by tag; `?page=<n>` and `?perPage=<n>` (optional, `perPage` ≤ 200) paginate | `200` `{ "flags": [Flag], "total", "page", "perPage" }` |
 | `GET` | `/v1/flags/count` | Count flags, split by enabled state. | — | `200` `{ "total", "enabled", "disabled" }` |
 | `GET` | `/v1/flags/keys` | List live flag keys without full objects. | — | `200` `{ "keys": [string] }` |
 | `POST` | `/v1/flags` | Create a flag. | `key` (string, required), `enabled` (boolean, required), `description` (string, optional), `rolloutPercentage` (integer 0–100, optional), `tags` (array of strings, optional) | `201` `Flag` |
@@ -74,11 +74,22 @@ every `/v1` route requires `Authorization: Bearer <token>` when
 | `PATCH` | `/v1/flags/:key` | Update a flag. | `enabled` (boolean), `description` (string), `rolloutPercentage` (integer 0–100), and/or `tags` (array of strings) — at least one | `200` `Flag` |
 | `POST` | `/v1/flags/:key/toggle` | Flip a flag's `enabled` state without a body. | `:key` path param | `200` `Flag` |
 | `DELETE` | `/v1/flags/:key` | Delete a flag. | `:key` path param | `204` (no body) |
-| `GET` | `/v1/flags/:key/evaluate` | Evaluate a flag (hot path for pollers). | `:key` path param; `?unit=<string>` (optional) buckets the unit for percentage rollouts | `200` `{ "key", "enabled", "rolloutPercentage"? }` |
+| `GET` | `/v1/flags/:key/evaluate` | Evaluate a flag (hot path for pollers). | `:key` path param; `?unit=<string>` (optional) buckets the unit for percentage rollouts; `?environment=<key>` (optional) applies that environment's override | `200` `{ "key", "enabled", "rolloutPercentage"?, "environment"? }` |
 | `GET` | `/v1/flags/:key/history` | Change history for a flag. | `:key` path param; `?limit=<n>` (optional) returns only the most recent `n` events (integer 1–500) | `200` `{ "key", "events": [FlagEvent] }` |
 | `GET` | `/v1/flags/:key/tags` | List a flag's tags. | `:key` path param | `200` `{ "key", "tags": [string] }` |
 | `PUT` | `/v1/flags/:key/tags/:tag` | Attach one tag to a flag (idempotent). | `:key` and `:tag` path params; the same tag rules as `tags` apply | `200` `Flag` |
 | `DELETE` | `/v1/flags/:key/tags/:tag` | Detach one tag from a flag (idempotent). | `:key` and `:tag` path params | `200` `Flag` |
+| `POST` | `/v1/webhooks` | Register a webhook subscription. | `url` (https, required), `events` (array of `flag.created`, `flag.updated`, `flag.deleted`, `tag.retired`, required), `secret` (string ≥16 chars, optional) | `201` `Webhook` |
+| `GET` | `/v1/webhooks` | List webhook subscriptions. | — | `200` `{ "webhooks": [Webhook] }` |
+| `GET` | `/v1/webhooks/:id` | Fetch one subscription. | `:id` path param | `200` `Webhook` |
+| `DELETE` | `/v1/webhooks/:id` | Remove a subscription. | `:id` path param | `204` (no body) |
+| `POST` | `/v1/webhooks/:id/test` | Record a test delivery for the subscription's first event. | `:id` path param | `202` `{ "delivery": Delivery }` |
+| `GET` | `/v1/webhooks/:id/deliveries` | Delivery history, newest first. | `?status=<pending\|delivered\|failed>`, `?limit=<n>` (both optional) | `200` `{ "deliveries": [Delivery] }` |
+| `GET` | `/v1/environments` | List environments. | — | `200` `{ "environments": [Environment] }` |
+| `POST` | `/v1/environments` | Create an environment. | `key` (lowercase kebab-case, required), `displayName` (optional) | `201` `Environment` |
+| `GET` | `/v1/flags/:key/environments` | Every environment override on a flag. | `:key` path param | `200` `{ "key", "overrides": [Override] }` |
+| `PUT` | `/v1/flags/:key/environments/:environment` | Set an override. | `enabled` (boolean) and/or `rolloutPercentage` (integer 0–100) — at least one | `200` `Override` |
+| `DELETE` | `/v1/flags/:key/environments/:environment` | Clear an override. | path params | `204` (no body) |
 | `GET` | `/v1/tags` | List distinct tags across all flags with usage counts. | — | `200` `{ "tags": [{ "tag", "count" }] }` |
 | `GET` | `/v1/tags/:tag/flags` | List the flags carrying one tag. | `:tag` path param | `200` `{ "tag", "flags": [Flag] }` (`404` `tag_not_found` when no live flag carries it) |
 | `DELETE` | `/v1/tags/:tag` | Retire a tag: remove it from every flag carrying it. | `:tag` path param | `200` `{ "tag", "removedFrom" }` |
@@ -209,7 +220,49 @@ curl -s 'http://localhost:3333/v1/flags/new-checkout/history?limit=2'
 A `limit` outside that range (or not an integer) returns `400`
 `invalid_limit`.
 
-### Errors
+### Webhooks
+
+Register an https endpoint and Flagpole records a delivery every time a flag
+changes. Deliveries are recorded, not sent — Flagpole is a reference
+implementation, so the transport stays yours — but the history is a faithful
+account of what a real sender would have attempted.
+
+```bash
+curl -X POST http://localhost:3333/v1/webhooks \
+  -H 'content-type: application/json' \
+  -d '{"url":"https://hooks.example.com/flagpole","events":["flag.updated","flag.deleted"]}'
+```
+
+A subscription names the events it wants. `POST /v1/webhooks/:id/test` records
+a delivery immediately so you can verify wiring before a real change happens,
+and `GET /v1/webhooks/:id/deliveries` returns the history newest-first,
+filterable by `?status=` and trimmable with `?limit=`.
+
+Supply a `secret` of at least 16 characters when you intend to verify
+signatures at the receiving end; it is stored with the subscription and never
+returned in delivery payloads.
+
+## Environments
+
+A flag's `enabled` and `rolloutPercentage` are its defaults. An environment
+override replaces either value for one environment only, so `production` can
+lag `staging` without duplicating the flag:
+
+```bash
+curl -X PUT http://localhost:3333/v1/flags/new-checkout/environments/staging \
+  -H 'content-type: application/json' \
+  -d '{"enabled":true}'
+
+curl 'http://localhost:3333/v1/flags/new-checkout/evaluate?environment=staging'
+# => { "key": "new-checkout", "enabled": true, "environment": "staging" }
+```
+
+`development`, `staging`, and `production` exist from the start; add more with
+`POST /v1/environments`. Evaluating without `?environment=` returns the flag's
+own defaults, so existing pollers are unaffected. Deleting a flag clears its
+overrides.
+
+## Errors
 
 Every error uses the same envelope:
 
@@ -230,6 +283,16 @@ Every error uses the same envelope:
 | `400` | `invalid_limit` | History `limit` is not an integer between 1 and 500. |
 | `401` | `unauthorized` | Missing or wrong bearer token. |
 | `404` | `flag_not_found` | No flag with that key. |
+| `400` | `invalid_pagination` | `page` or `perPage` is not a positive integer, or `perPage` exceeds 200. |
+| `400` | `invalid_webhook_url` | `url` is missing, too long, or not `https://`. |
+| `400` | `invalid_webhook_events` | `events` is empty or names an event Flagpole does not emit. |
+| `400` | `invalid_webhook_secret` | `secret` is shorter than 16 characters. |
+| `400` | `invalid_delivery_status` | `status` is not `pending`, `delivered`, or `failed`. |
+| `400` | `invalid_environment_key` | `key` is not 1–50 characters of lowercase kebab-case. |
+| `404` | `webhook_not_found` | No webhook with that id. |
+| `404` | `environment_not_found` | No environment with that key. |
+| `404` | `override_not_found` | That flag has no override in that environment. |
+| `409` | `environment_exists` | An environment with that key already exists. |
 | `404` | `not_found` | Unknown route. |
 | `409` | `flag_exists` | Create with a key that already exists. |
 

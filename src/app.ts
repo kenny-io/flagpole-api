@@ -11,9 +11,26 @@ import { Hono } from "hono";
 import { isEnabledForUnit } from "./rollout.js";
 import type { FlagStore } from "./store.js";
 import type { UpdateFlagInput } from "./types.js";
+import {
+  createEnvironmentRegistry,
+  ENVIRONMENT_KEY_PATTERN,
+  MAX_ENVIRONMENT_KEY_LENGTH,
+  type EnvironmentRegistry,
+} from "./environments.js";
+import {
+  createWebhookRegistry,
+  MAX_WEBHOOK_URL_LENGTH,
+  WEBHOOK_EVENTS,
+  type WebhookEvent,
+  type WebhookRegistry,
+} from "./webhooks.js";
 
 export interface AppOptions {
   store: FlagStore;
+  /** Webhook subscriptions. A fresh in-memory registry when omitted. */
+  webhooks?: WebhookRegistry;
+  /** Environment registry. Seeded with the three defaults when omitted. */
+  environments?: EnvironmentRegistry;
   /**
    * Bearer token required on all /v1 routes. When omitted, auth is
    * disabled entirely (dev mode) — convenient locally, but never run an
@@ -24,6 +41,9 @@ export interface AppOptions {
 
 /** Flag keys: 1-64 chars of letters, digits, dots, dashes, underscores. */
 const FLAG_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+
+/** Largest page a single `GET /v1/flags` response will return. */
+const MAX_PAGE_SIZE = 200;
 
 /** Build the uniform error envelope used by every non-2xx response. */
 const errorBody = (code: string, message: string) => ({
@@ -78,11 +98,16 @@ const findTagsProblem = (value: unknown): string | undefined => {
   return undefined;
 };
 
-export function createApp({ store, apiToken }: AppOptions): Hono {
+export function createApp({
+  store,
+  apiToken,
+  webhooks = createWebhookRegistry(),
+  environments = createEnvironmentRegistry(),
+}: AppOptions): Hono {
   const app = new Hono();
 
   app.get("/health", (c) => c.json({ status: "ok" }));
-  app.get("/version", (c) => c.json({ version: "0.4.0" }));
+  app.get("/version", (c) => c.json({ version: "1.0.0" }));
 
   const v1 = new Hono();
 
@@ -111,10 +136,41 @@ export function createApp({ store, apiToken }: AppOptions): Hono {
     // could never be a valid tag simply yields an empty list rather than
     // an error.
     const tagParam = c.req.query("tag");
-    const flags = tagParam
+    const matching = tagParam
       ? store.list().filter((flag) => flag.tags?.includes(tagParam))
       : store.list();
-    return c.json({ flags });
+    // 1.0 paginates this endpoint. `page`/`perPage` are optional and default
+    // to the whole list, so a caller that ignores them still receives every
+    // flag; `total` is always the unpaginated count.
+    const pageParam = c.req.query("page");
+    const perPageParam = c.req.query("perPage");
+    if (
+      (pageParam !== undefined && !/^\d+$/.test(pageParam)) ||
+      (perPageParam !== undefined && !/^\d+$/.test(perPageParam))
+    ) {
+      return c.json(
+        errorBody("invalid_pagination", "`page` and `perPage` must be positive integers."),
+        400,
+      );
+    }
+    const perPage = perPageParam ? Number(perPageParam) : matching.length;
+    const page = pageParam ? Number(pageParam) : 1;
+    if (page < 1 || (perPageParam !== undefined && (perPage < 1 || perPage > MAX_PAGE_SIZE))) {
+      return c.json(
+        errorBody(
+          "invalid_pagination",
+          `\`page\` must be at least 1 and \`perPage\` at most ${MAX_PAGE_SIZE}.`,
+        ),
+        400,
+      );
+    }
+    const start = (page - 1) * perPage;
+    return c.json({
+      flags: matching.slice(start, start + perPage),
+      total: matching.length,
+      page,
+      perPage,
+    });
   });
 
   // Distinct tags across all flags with usage counts, sorted by tag name so
@@ -134,6 +190,200 @@ export function createApp({ store, apiToken }: AppOptions): Hono {
   v1.get("/flags/keys", (c) =>
     c.json({ keys: store.list().map((flag) => flag.key) }),
   );
+
+  // ---------------------------------------------------------------- webhooks
+  v1.post("/webhooks", async (c) => {
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json(errorBody("invalid_json", "Request body must be valid JSON."), 400);
+    }
+    const { url, events, secret } = (body ?? {}) as Record<string, unknown>;
+    if (typeof url !== "string" || url.length === 0 || url.length > MAX_WEBHOOK_URL_LENGTH) {
+      return c.json(
+        errorBody("invalid_webhook_url", `\`url\` must be 1-${MAX_WEBHOOK_URL_LENGTH} characters.`),
+        400,
+      );
+    }
+    if (!/^https:\/\//.test(url)) {
+      return c.json(
+        errorBody("invalid_webhook_url", "`url` must be an https:// endpoint."),
+        400,
+      );
+    }
+    if (
+      !Array.isArray(events) ||
+      events.length === 0 ||
+      events.some((event) => !WEBHOOK_EVENTS.includes(event as WebhookEvent))
+    ) {
+      return c.json(
+        errorBody(
+          "invalid_webhook_events",
+          `\`events\` must name at least one of: ${WEBHOOK_EVENTS.join(", ")}.`,
+        ),
+        400,
+      );
+    }
+    if (secret !== undefined && (typeof secret !== "string" || secret.length < 16)) {
+      return c.json(
+        errorBody("invalid_webhook_secret", "`secret` must be at least 16 characters."),
+        400,
+      );
+    }
+    const webhook = webhooks.create({
+      url,
+      events: events as WebhookEvent[],
+      ...(secret !== undefined ? { secret: secret as string } : {}),
+    });
+    return c.json(webhook, 201);
+  });
+
+  v1.get("/webhooks", (c) => c.json({ webhooks: webhooks.list() }));
+
+  v1.get("/webhooks/:id", (c) => {
+    const webhook = webhooks.get(c.req.param("id"));
+    if (!webhook) {
+      return c.json(errorBody("webhook_not_found", "No webhook with that id."), 404);
+    }
+    return c.json(webhook);
+  });
+
+  v1.delete("/webhooks/:id", (c) => {
+    if (!webhooks.delete(c.req.param("id"))) {
+      return c.json(errorBody("webhook_not_found", "No webhook with that id."), 404);
+    }
+    return c.body(null, 204);
+  });
+
+  v1.post("/webhooks/:id/test", (c) => {
+    const webhook = webhooks.get(c.req.param("id"));
+    if (!webhook) {
+      return c.json(errorBody("webhook_not_found", "No webhook with that id."), 404);
+    }
+    // A test delivery is recorded against the subscription's first event so
+    // integrators can verify wiring without waiting for a real flag change.
+    const [delivery] = webhooks.dispatch(webhook.events[0]!);
+    return c.json({ delivery }, 202);
+  });
+
+  v1.get("/webhooks/:id/deliveries", (c) => {
+    const statusParam = c.req.query("status");
+    if (statusParam !== undefined && !["pending", "delivered", "failed"].includes(statusParam)) {
+      return c.json(
+        errorBody("invalid_delivery_status", "`status` must be pending, delivered, or failed."),
+        400,
+      );
+    }
+    const limitParam = c.req.query("limit");
+    if (limitParam !== undefined && !/^\d+$/.test(limitParam)) {
+      return c.json(errorBody("invalid_limit", "`limit` must be a positive integer."), 400);
+    }
+    const deliveries = webhooks.deliveries(c.req.param("id"), {
+      ...(statusParam ? { status: statusParam as "pending" | "delivered" | "failed" } : {}),
+      ...(limitParam ? { limit: Number(limitParam) } : {}),
+    });
+    if (!deliveries) {
+      return c.json(errorBody("webhook_not_found", "No webhook with that id."), 404);
+    }
+    return c.json({ deliveries });
+  });
+
+  // ------------------------------------------------------------ environments
+  v1.get("/environments", (c) => c.json({ environments: environments.list() }));
+
+  v1.post("/environments", async (c) => {
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json(errorBody("invalid_json", "Request body must be valid JSON."), 400);
+    }
+    const { key, displayName } = (body ?? {}) as Record<string, unknown>;
+    if (
+      typeof key !== "string" ||
+      key.length > MAX_ENVIRONMENT_KEY_LENGTH ||
+      !ENVIRONMENT_KEY_PATTERN.test(key)
+    ) {
+      return c.json(
+        errorBody(
+          "invalid_environment_key",
+          `\`key\` must be 1-${MAX_ENVIRONMENT_KEY_LENGTH} characters of lowercase kebab-case.`,
+        ),
+        400,
+      );
+    }
+    if (displayName !== undefined && typeof displayName !== "string") {
+      return c.json(errorBody("invalid_display_name", "`displayName` must be a string."), 400);
+    }
+    const environment = environments.create(key, displayName as string | undefined);
+    if (!environment) {
+      return c.json(errorBody("environment_exists", "That environment already exists."), 409);
+    }
+    return c.json(environment, 201);
+  });
+
+  v1.get("/flags/:key/environments", (c) => {
+    const key = c.req.param("key");
+    if (!store.get(key)) {
+      return c.json(errorBody("flag_not_found", "No flag with that key."), 404);
+    }
+    return c.json({ key, overrides: environments.overrides(key) });
+  });
+
+  v1.put("/flags/:key/environments/:environment", async (c) => {
+    const key = c.req.param("key");
+    const environment = c.req.param("environment");
+    const flag = store.get(key);
+    if (!flag) {
+      return c.json(errorBody("flag_not_found", "No flag with that key."), 404);
+    }
+    if (!environments.has(environment)) {
+      return c.json(errorBody("environment_not_found", "No environment with that key."), 404);
+    }
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json(errorBody("invalid_json", "Request body must be valid JSON."), 400);
+    }
+    const { enabled, rolloutPercentage } = (body ?? {}) as Record<string, unknown>;
+    if (enabled !== undefined && typeof enabled !== "boolean") {
+      return c.json(errorBody("invalid_enabled", "`enabled` must be a boolean."), 400);
+    }
+    if (rolloutPercentage !== undefined && !isValidRolloutPercentage(rolloutPercentage)) {
+      return c.json(
+        errorBody(
+          "invalid_rollout_percentage",
+          "`rolloutPercentage` must be an integer between 0 and 100.",
+        ),
+        400,
+      );
+    }
+    if (enabled === undefined && rolloutPercentage === undefined) {
+      return c.json(
+        errorBody("empty_update", "Provide `enabled` and/or `rolloutPercentage`."),
+        400,
+      );
+    }
+    const override = environments.setOverride(key, environment, {
+      ...(enabled !== undefined ? { enabled: enabled as boolean } : {}),
+      ...(rolloutPercentage !== undefined
+        ? { rolloutPercentage: rolloutPercentage as number }
+        : {}),
+    });
+    return c.json(override);
+  });
+
+  v1.delete("/flags/:key/environments/:environment", (c) => {
+    if (!store.get(c.req.param("key"))) {
+      return c.json(errorBody("flag_not_found", "No flag with that key."), 404);
+    }
+    if (!environments.clearOverride(c.req.param("key"), c.req.param("environment"))) {
+      return c.json(errorBody("override_not_found", "No override for that environment."), 404);
+    }
+    return c.body(null, 204);
+  });
 
   v1.get("/tags", (c) => {
     const counts = new Map<string, number>();
@@ -387,6 +637,10 @@ export function createApp({ store, apiToken }: AppOptions): Hono {
 
   v1.delete("/flags/:key", (c) => {
     const removed = store.delete(c.req.param("key"));
+    if (removed) {
+      environments.clearFlag(c.req.param("key"));
+      webhooks.dispatch("flag.deleted");
+    }
     if (!removed) {
       return c.json(errorBody("flag_not_found", "No flag with that key."), 404);
     }
@@ -403,15 +657,33 @@ export function createApp({ store, apiToken }: AppOptions): Hono {
     // the param get the plain boolean rather than a surprise bucket.
     const unitParam = c.req.query("unit");
     const unit = unitParam ? unitParam : undefined;
-    const enabled = isEnabledForUnit(flag.key, flag.enabled, flag.rolloutPercentage, unit);
+    // `?environment=` evaluates the flag as that environment sees it: the
+    // override's values win, and anything it does not set falls back to the
+    // flag's own defaults.
+    const environmentParam = c.req.query("environment");
+    if (environmentParam && !environments.has(environmentParam)) {
+      return c.json(errorBody("environment_not_found", "No environment with that key."), 404);
+    }
+    const override = environmentParam
+      ? environments.override(flag.key, environmentParam)
+      : undefined;
+    const effectiveEnabled = override?.enabled ?? flag.enabled;
+    const effectiveRollout = override?.rolloutPercentage ?? flag.rolloutPercentage;
+    const enabled = isEnabledForUnit(flag.key, effectiveEnabled, effectiveRollout, unit);
     // Minimal payload on purpose: this is the hot path SDKs poll.
-    const result: { key: string; enabled: boolean; rolloutPercentage?: number } = {
+    const result: {
+      key: string;
+      enabled: boolean;
+      rolloutPercentage?: number;
+      environment?: string;
+    } = {
       key: flag.key,
       enabled,
     };
-    if (flag.rolloutPercentage !== undefined) {
-      result.rolloutPercentage = flag.rolloutPercentage;
+    if (effectiveRollout !== undefined) {
+      result.rolloutPercentage = effectiveRollout;
     }
+    if (environmentParam) result.environment = environmentParam;
     return c.json(result);
   });
 
