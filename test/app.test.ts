@@ -34,7 +34,7 @@ describe("GET /version", () => {
     const app = makeApp("secret");
     const res = await app.request("/version");
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ version: "0.4.0" });
+    expect(await res.json()).toEqual({ version: "1.0.0" });
   });
 });
 
@@ -275,6 +275,184 @@ describe("DELETE /v1/flags/:key/tags/:tag", () => {
     expect((await again.json()).tags).toEqual(["web"]);
     const missing = await app.request("/v1/flags/nope/tags/web", { method: "DELETE" });
     expect(missing.status).toBe(404);
+  });
+});
+
+describe("POST /v1/webhooks", () => {
+  it("registers a subscription and returns 201", async () => {
+    const app = makeApp();
+    const res = await app.request(
+      "/v1/webhooks",
+      json({ url: "https://hooks.example.com/flagpole", events: ["flag.created"] }),
+    );
+    expect(res.status).toBe(201);
+    const webhook = await res.json();
+    expect(webhook.url).toBe("https://hooks.example.com/flagpole");
+    expect(webhook.events).toEqual(["flag.created"]);
+    expect(typeof webhook.id).toBe("string");
+  });
+
+  it("rejects a non-https url, unknown events, and a short secret", async () => {
+    const app = makeApp();
+    const insecure = await app.request(
+      "/v1/webhooks",
+      json({ url: "http://hooks.example.com", events: ["flag.created"] }),
+    );
+    expect(insecure.status).toBe(400);
+    expect((await insecure.json()).error.code).toBe("invalid_webhook_url");
+    const unknown = await app.request(
+      "/v1/webhooks",
+      json({ url: "https://hooks.example.com", events: ["flag.exploded"] }),
+    );
+    expect((await unknown.json()).error.code).toBe("invalid_webhook_events");
+    const shortSecret = await app.request(
+      "/v1/webhooks",
+      json({ url: "https://hooks.example.com", events: ["flag.created"], secret: "tiny" }),
+    );
+    expect((await shortSecret.json()).error.code).toBe("invalid_webhook_secret");
+  });
+});
+
+describe("webhook lifecycle", () => {
+  it("lists, fetches, tests, and deletes a subscription", async () => {
+    const app = makeApp();
+    const created = await (
+      await app.request(
+        "/v1/webhooks",
+        json({ url: "https://hooks.example.com/a", events: ["flag.updated"] }),
+      )
+    ).json();
+
+    const list = await (await app.request("/v1/webhooks")).json();
+    expect(list.webhooks.map((w: { id: string }) => w.id)).toContain(created.id);
+
+    const fetched = await app.request(`/v1/webhooks/${created.id}`);
+    expect(fetched.status).toBe(200);
+
+    const tested = await app.request(`/v1/webhooks/${created.id}/test`, { method: "POST" });
+    expect(tested.status).toBe(202);
+    expect((await tested.json()).delivery.event).toBe("flag.updated");
+
+    const deliveries = await (
+      await app.request(`/v1/webhooks/${created.id}/deliveries`)
+    ).json();
+    expect(deliveries.deliveries).toHaveLength(1);
+
+    const filtered = await (
+      await app.request(`/v1/webhooks/${created.id}/deliveries?status=delivered`)
+    ).json();
+    expect(filtered.deliveries).toHaveLength(0);
+
+    const removed = await app.request(`/v1/webhooks/${created.id}`, { method: "DELETE" });
+    expect(removed.status).toBe(204);
+    expect((await app.request(`/v1/webhooks/${created.id}`)).status).toBe(404);
+  });
+
+  it("records a delivery when a flag is deleted", async () => {
+    const app = makeApp();
+    const hook = await (
+      await app.request(
+        "/v1/webhooks",
+        json({ url: "https://hooks.example.com/b", events: ["flag.deleted"] }),
+      )
+    ).json();
+    await app.request("/v1/flags", json({ key: "doomed", enabled: true }));
+    await app.request("/v1/flags/doomed", { method: "DELETE" });
+    const deliveries = await (
+      await app.request(`/v1/webhooks/${hook.id}/deliveries`)
+    ).json();
+    expect(deliveries.deliveries[0].event).toBe("flag.deleted");
+  });
+});
+
+describe("environments", () => {
+  it("seeds the three conventional environments and adds more", async () => {
+    const app = makeApp();
+    const seeded = await (await app.request("/v1/environments")).json();
+    expect(seeded.environments.map((e: { key: string }) => e.key)).toEqual([
+      "development",
+      "staging",
+      "production",
+    ]);
+    const created = await app.request(
+      "/v1/environments",
+      json({ key: "canary", displayName: "Canary" }),
+    );
+    expect(created.status).toBe(201);
+    const duplicate = await app.request("/v1/environments", json({ key: "canary" }));
+    expect(duplicate.status).toBe(409);
+    const invalid = await app.request("/v1/environments", json({ key: "Not Valid" }));
+    expect((await invalid.json()).error.code).toBe("invalid_environment_key");
+  });
+
+  it("overrides a flag per environment and evaluates through it", async () => {
+    const app = makeApp();
+    await app.request("/v1/flags", json({ key: "checkout", enabled: false }));
+
+    const override = await app.request(
+      "/v1/flags/checkout/environments/staging",
+      { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: true }) },
+    );
+    expect(override.status).toBe(200);
+    expect((await override.json()).enabled).toBe(true);
+
+    const staging = await (
+      await app.request("/v1/flags/checkout/evaluate?environment=staging")
+    ).json();
+    expect(staging.enabled).toBe(true);
+    expect(staging.environment).toBe("staging");
+
+    const production = await (
+      await app.request("/v1/flags/checkout/evaluate?environment=production")
+    ).json();
+    expect(production.enabled).toBe(false);
+
+    const listed = await (
+      await app.request("/v1/flags/checkout/environments")
+    ).json();
+    expect(listed.overrides).toHaveLength(1);
+
+    const cleared = await app.request("/v1/flags/checkout/environments/staging", {
+      method: "DELETE",
+    });
+    expect(cleared.status).toBe(204);
+    const afterClear = await (
+      await app.request("/v1/flags/checkout/evaluate?environment=staging")
+    ).json();
+    expect(afterClear.enabled).toBe(false);
+  });
+
+  it("404s an unknown environment on both write and evaluate", async () => {
+    const app = makeApp();
+    await app.request("/v1/flags", json({ key: "x", enabled: true }));
+    const write = await app.request("/v1/flags/x/environments/nowhere", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enabled: false }),
+    });
+    expect((await write.json()).error.code).toBe("environment_not_found");
+    const read = await app.request("/v1/flags/x/evaluate?environment=nowhere");
+    expect(read.status).toBe(404);
+  });
+});
+
+describe("GET /v1/flags pagination", () => {
+  it("returns every flag by default and a page when asked", async () => {
+    const app = makeApp();
+    for (const key of ["a", "b", "c"]) {
+      await app.request("/v1/flags", json({ key, enabled: true }));
+    }
+    const all = await (await app.request("/v1/flags")).json();
+    expect(all.flags).toHaveLength(3);
+    expect(all.total).toBe(3);
+
+    const page2 = await (await app.request("/v1/flags?page=2&perPage=2")).json();
+    expect(page2.flags).toHaveLength(1);
+    expect(page2.total).toBe(3);
+    expect(page2.page).toBe(2);
+
+    const bad = await app.request("/v1/flags?page=0&perPage=2");
+    expect((await bad.json()).error.code).toBe("invalid_pagination");
   });
 });
 
