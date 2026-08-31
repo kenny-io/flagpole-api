@@ -7,9 +7,9 @@ dashboard, no SDK lock-in, no database required — just an HTTP server your
 services can query. Run it in memory for ephemeral environments, or point it
 at a JSON file for durable, human-inspectable storage.
 
-Version 1.0 adds webhook delivery records, per-environment overrides, and
-paginated flag listing. Public `GET /health` and `GET /version` responses expose
-the running `1.0.0` release without credentials.
+Version 1.1 adds a public `GET /ready` deployment probe that reports the running
+release once the service is ready to accept traffic. `GET /health` and
+`GET /version` remain available without credentials.
 
 ## Why Flagpole
 
@@ -58,14 +58,15 @@ curl -s http://localhost:3333/v1/flags \
 
 ## API reference
 
-All request and response bodies are JSON. `GET /health` and `GET /version` are always public;
+All request and response bodies are JSON. `GET /health`, `GET /version`, and `GET /ready` are always public;
 every `/v1` route requires `Authorization: Bearer <token>` when
 `FLAGPOLE_API_TOKEN` is set.
 
 | Method | Path | Description | Body / params | Success |
 | ------ | ---- | ----------- | ------------- | ------- |
-| `GET` | `/health` | Liveness and release check. | — | `200` `{ "status": "ok", "version": "1.0.0" }` |
-| `GET` | `/version` | Running API release. | — | `200` `{ "version": "1.0.0" }` |
+| `GET` | `/health` | Liveness and release check. | — | `200` `{ "status": "ok", "version": "1.1.0" }` |
+| `GET` | `/version` | Running API release. | — | `200` `{ "version": "1.1.0" }` |
+| `GET` | `/ready` | Deployment readiness and release check. | — | `200` `{ "status": "ready", "version": "1.1.0" }` |
 | `GET` | `/v1/flags` | List flags. | `?tag=<t>` (optional) filters by tag; `?page=<n>` and `?perPage=<n>` (optional, `perPage` ≤ 200) paginate | `200` `{ "flags": [Flag], "total", "page", "perPage" }` |
 | `GET` | `/v1/flags/count` | Count flags, split by enabled state. | — | `200` `{ "total", "enabled", "disabled" }` |
 | `GET` | `/v1/flags/keys` | List live flag keys without full objects. | — | `200` `{ "keys": [string] }` |

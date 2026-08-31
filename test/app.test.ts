@@ -25,7 +25,7 @@ describe("GET /health", () => {
     const app = makeApp("secret");
     const res = await app.request("/health");
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ status: "ok", version: "1.0.0" });
+    expect(await res.json()).toEqual({ status: "ok", version: "1.1.0" });
   });
 });
 
@@ -34,7 +34,18 @@ describe("GET /version", () => {
     const app = makeApp("secret");
     const res = await app.request("/version");
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ version: "1.0.0" });
+    expect(await res.json()).toEqual({ version: "1.1.0" });
+  });
+});
+
+describe("GET /ready", () => {
+  it("reports release readiness without requiring auth", async () => {
+    const secured = await makeApp("secret").request("/ready");
+    expect(secured.status).toBe(200);
+    expect(await secured.json()).toEqual({
+      status: "ready",
+      version: "1.1.0",
+    });
   });
 });
 
