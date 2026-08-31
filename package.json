@@ -1,7 +1,7 @@
 {
   "name": "flagpole-api",
   "version": "1.0.0",
-  "description": "Flagpole \u2014 a lightweight feature-flag service by Polaris Labs",
+  "description": "Flagpole — a lightweight feature-flag service by Polaris Labs",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
@@ -27,6 +27,7 @@
     "hono": "^4.6.14"
   },
   "devDependencies": {
+    "@types/node": "^22.20.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
