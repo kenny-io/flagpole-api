@@ -62,7 +62,7 @@ every `/v1` route requires `Authorization: Bearer <token>` when
 
 | Method | Path | Description | Body / params | Success |
 | ------ | ---- | ----------- | ------------- | ------- |
-| `GET` | `/health` | Liveness check. | — | `200` `{ "status": "ok" }` |
+| `GET` | `/health` | Liveness and release check. | — | `200` `{ "status": "ok", "version": "1.0.0" }` |
 | `GET` | `/version` | Running API release. | — | `200` `{ "version": "0.4.0" }` |
 | `GET` | `/v1/flags` | List flags. | `?tag=<t>` (optional) filters by tag; `?page=<n>` and `?perPage=<n>` (optional, `perPage` ≤ 200) paginate | `200` `{ "flags": [Flag], "total", "page", "perPage" }` |
 | `GET` | `/v1/flags/count` | Count flags, split by enabled state. | — | `200` `{ "total", "enabled", "disabled" }` |
