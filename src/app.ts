@@ -40,7 +40,7 @@ export interface AppOptions {
 }
 
 /** Public release identifier returned by unauthenticated service probes. */
-const API_VERSION = "1.0.0";
+const API_VERSION = "1.1.0";
 
 /** Flag keys: 1-64 chars of letters, digits, dots, dashes, underscores. */
 const FLAG_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
@@ -111,6 +111,12 @@ export function createApp({
 
   app.get("/health", (c) => c.json({ status: "ok", version: API_VERSION }));
   app.get("/version", (c) => c.json({ version: API_VERSION }));
+  app.get("/ready", (c) =>
+    c.json({
+      status: "ready",
+      version: API_VERSION,
+    }),
+  );
 
   const v1 = new Hono();
 
